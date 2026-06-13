@@ -15,7 +15,7 @@ def test_missing_mx_records_add_risk(monkeypatch) -> None:
 
     result = analyze_dns_infrastructure("https://vasiapupkin.xyz", ["allegro.pl"])
 
-    assert result["score"] == 20
+    assert result["score"] == 10
     assert result["status"] == "no_mx"
 
 

@@ -54,7 +54,7 @@ def _cache_is_fresh() -> bool:
 def download_blacklist() -> set[str]:
     if requests is None:
         cached = _load_cached_domains()
-        return cached if cached else set(FALLBACK_DOMAINS)
+        return cached | set(FALLBACK_DOMAINS)
 
     try:
         response = requests.get(BLACKLIST_URL, timeout=10)
@@ -68,10 +68,10 @@ def download_blacklist() -> set[str]:
         with CACHE_PATH.open("w", encoding="utf-8") as file:
             file.write("domain\n")
             file.write("\n".join(sorted(domains)))
-        return domains
+        return domains | set(FALLBACK_DOMAINS)
     except Exception:
         cached = _load_cached_domains()
-        return cached if cached else set(FALLBACK_DOMAINS)
+        return cached | set(FALLBACK_DOMAINS)
 
 
 def _get_blacklist_domains() -> set[str]:

@@ -8,7 +8,7 @@ except Exception:
     dns = None
 
 
-NO_MX_SCORE = 20
+NO_MX_SCORE = 10
 
 
 def is_trusted_domain(registered_domain: str, trusted_domains: list[str]) -> bool:
@@ -69,7 +69,7 @@ def analyze_dns_infrastructure(url_or_domain: str, trusted_domains: list[str]) -
         result["score"] = NO_MX_SCORE
         result["description"] = (
             f"Registered domain {registered_domain} has no visible MX records; "
-            "real businesses usually configure mail infrastructure."
+            "this is a weak infrastructure signal, not proof of phishing."
         )
         result["error"] = str(error)
         return result
@@ -83,7 +83,7 @@ def analyze_dns_infrastructure(url_or_domain: str, trusted_domains: list[str]) -
         result["score"] = NO_MX_SCORE
         result["description"] = (
             f"Registered domain {registered_domain} has no visible MX records; "
-            "real businesses usually configure mail infrastructure."
+            "this is a weak infrastructure signal, not proof of phishing."
         )
 
     return result

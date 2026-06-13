@@ -1,8 +1,15 @@
 import re
 from urllib.parse import parse_qs, urljoin, urlparse
 
-import requests
-from bs4 import BeautifulSoup
+try:
+    import requests
+except Exception:
+    requests = None
+
+try:
+    from bs4 import BeautifulSoup
+except Exception:
+    BeautifulSoup = None
 
 
 TRUSTED_MICROSOFT_LOGIN_HOSTS = {
@@ -82,6 +89,9 @@ def fetch_page(url: str) -> tuple[str | None, str | None]:
 
     If the page cannot be fetched, html is None and error contains the reason.
     """
+    if requests is None:
+        return None, "requests is not installed."
+
     try:
         response = requests.get(
             url,
@@ -297,6 +307,10 @@ def analyze_page_rules(url: str) -> dict:
         result["fetch_error"] = "Empty HTML"
         return result
 
+    if BeautifulSoup is None:
+        result["fetch_error"] = "beautifulsoup4 is not installed."
+        return result
+
     soup = BeautifulSoup(html, "html.parser")
     page_text = soup.get_text(" ", strip=True)
     combined_text = f"{html} {page_text}"
@@ -306,6 +320,9 @@ def analyze_page_rules(url: str) -> dict:
     login_field = has_login_field(soup)
     aad_matches = detect_aad_fingerprint(html)
     suspicious_text_matches = detect_suspicious_text(page_text)
+    microsoft_context = bool(
+        suspicious_domain_matches or microsoft_branding or aad_matches
+    )
 
     # 1. AAD fingerprint on a non-Microsoft domain
     if len(aad_matches) >= 2:
@@ -329,7 +346,7 @@ def analyze_page_rules(url: str) -> dict:
         })
 
     # 3. Password form submits to a non-Microsoft target
-    if form_action_is_suspicious(soup, url):
+    if microsoft_context and form_action_is_suspicious(soup, url):
         result["score"] += 45
         result["hard_block"] = True
         result["matched_rules"].append({
@@ -340,7 +357,7 @@ def analyze_page_rules(url: str) -> dict:
         })
 
     # 4. JavaScript changes the form action
-    if detect_js_form_action_modification(html):
+    if microsoft_context and detect_js_form_action_modification(html):
         result["score"] += 35
         result["matched_rules"].append({
             "id": "js_modifies_form_action",
