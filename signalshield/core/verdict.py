@@ -6,13 +6,25 @@ import json
 VERDICT_DANGEROUS = "DANGEROUS"
 VERDICT_SUSPICIOUS = "SUSPICIOUS"
 VERDICT_SAFE = "SAFE"
+VERDICT_NOT_FOUND = "NOT_FOUND"
 
 
-# Optional imports — приложение не упадёт, если какой-то модуль ещё не готов
 try:
     from core.blacklist import check_blacklist
 except Exception:
     check_blacklist = None
+
+
+try:
+    from core.subdomain_spoofing import check_subdomain_spoofing
+except Exception:
+    check_subdomain_spoofing = None
+
+
+try:
+    from core.page_existence import check_page_existence
+except Exception:
+    check_page_existence = None
 
 
 try:
@@ -34,10 +46,6 @@ except Exception:
 
 
 def normalize_url(url: str) -> str:
-    """
-    Делает URL пригодным для анализа.
-    Если пользователь ввёл example.pl, превращаем в https://example.pl
-    """
     url = url.strip()
 
     if not url:
@@ -50,23 +58,11 @@ def normalize_url(url: str) -> str:
 
 
 def extract_hostname(url: str) -> str:
-    """
-    Извлекает hostname из URL.
-
-    https://example.pl/test -> example.pl
-    """
     parsed = urlparse(url)
     return parsed.hostname.lower() if parsed.hostname else ""
 
 
 def extract_registered_domain(url: str) -> str:
-    """
-    Возвращает основной домен.
-
-    https://login.example.pl/test -> example.pl
-
-    Если tldextract не установлен, используем простой fallback.
-    """
     hostname = extract_hostname(url)
 
     if not hostname:
@@ -92,15 +88,6 @@ def extract_registered_domain(url: str) -> str:
 
 
 def load_trusted_brands() -> list[str]:
-    """
-    Загружает список доверенных доменов из data/trusted_brands.json.
-
-    Поддерживает формат:
-    {
-      "banks": ["mbank.pl", "ing.pl"],
-      "shopping": ["allegro.pl"]
-    }
-    """
     project_root = Path(__file__).resolve().parents[1]
     trusted_path = project_root / "data" / "trusted_brands.json"
 
@@ -128,13 +115,6 @@ def load_trusted_brands() -> list[str]:
 
 
 def run_similarity_check(domain: str) -> list:
-    """
-    Запускает similarity-модуль.
-
-    Сделано гибко, потому что у check_similarity могут быть разные сигнатуры:
-    1. check_similarity(domain, trusted_list)
-    2. check_similarity(domain)
-    """
     if check_similarity is None:
         return []
 
@@ -152,9 +132,6 @@ def run_similarity_check(domain: str) -> list:
 
 
 def format_similarity_reason(similarity_results: list) -> str:
-    """
-    Формирует понятную причину для UI.
-    """
     if not similarity_results:
         return ""
 
@@ -193,18 +170,6 @@ def format_similarity_reason(similarity_results: list) -> str:
 
 
 def analyze_url(url: str) -> dict:
-    """
-    Главная функция анализа URL.
-
-    Она возвращает словарь, который ожидает app.py:
-
-    {
-        "verdict": "...",
-        "score": 0-100,
-        "reasons": [...],
-        "details": {...}
-    }
-    """
     url = normalize_url(url)
     hostname = extract_hostname(url)
     domain = extract_registered_domain(url)
@@ -217,15 +182,17 @@ def analyze_url(url: str) -> dict:
         "hostname": hostname,
         "domain": domain,
         "blacklist_match": False,
+        "subdomain_spoofing": None,
+        "page_existence": None,
         "domain_age_days": None,
         "similarity_results": [],
     }
 
     if not url or not hostname:
         return {
-            "verdict": VERDICT_SUSPICIOUS,
-            "score": 20,
-            "reasons": ["Invalid or empty URL."],
+            "verdict": VERDICT_NOT_FOUND,
+            "score": 0,
+            "reasons": ["URL is empty or invalid."],
             "details": details,
         }
 
@@ -255,6 +222,89 @@ def analyze_url(url: str) -> dict:
             }
     else:
         details["blacklist_status"] = "Blacklist module is not available."
+
+    # ============================================================
+    # Stage 1.5: Subdomain spoofing
+    # ============================================================
+
+    if check_subdomain_spoofing is not None:
+        try:
+            subdomain_result = check_subdomain_spoofing(url)
+        except Exception as error:
+            subdomain_result = {
+                "is_spoofed": False,
+                "error": str(error),
+            }
+
+        details["subdomain_spoofing"] = subdomain_result
+
+        if subdomain_result.get("is_spoofed"):
+            risk_score += 80
+
+            matched_brands = ", ".join(
+                subdomain_result.get("matched_brands", [])
+            )
+
+            reasons.append(
+                f"Brand name detected in subdomain ({matched_brands}), "
+                f"but the real registered domain is {subdomain_result.get('registered_domain')}."
+            )
+    else:
+        details["subdomain_spoofing"] = "Subdomain spoofing module is not available."
+
+    # ============================================================
+    # Stage 1.7: Page existence check
+    # ============================================================
+
+    if check_page_existence is not None:
+        try:
+            existence_result = check_page_existence(url)
+        except Exception as error:
+            existence_result = {
+                "status": "unknown",
+                "exists": None,
+                "evidence": [
+                    "Page existence check failed because of an internal error."
+                ],
+                "error": str(error),
+            }
+
+        details["page_existence"] = existence_result
+
+        existence_status = existence_result.get("status")
+        page_exists = existence_result.get("exists")
+
+        # Если домен или страница точно не существуют,
+        # возвращаем отдельный 4-й вердикт.
+        if existence_status in ["domain_not_found", "not_found"]:
+            not_found_reasons = []
+
+            if reasons:
+                not_found_reasons.extend(reasons)
+
+            not_found_reasons.append(
+                "The page or domain does not appear to exist."
+            )
+
+            for evidence in existence_result.get("evidence", []):
+                not_found_reasons.append(evidence)
+
+            return {
+                "verdict": VERDICT_NOT_FOUND,
+                "score": min(risk_score, 100),
+                "reasons": not_found_reasons,
+                "details": details,
+            }
+
+        # Если страница недоступна, но нет 100% доказательства, что её нет
+        if existence_status == "unreachable":
+            risk_score += 10
+
+            for evidence in existence_result.get("evidence", []):
+                reasons.append(evidence)
+
+    else:
+        details["page_existence"] = "Page existence module is not available."
 
     # ============================================================
     # Stage 2: WHOIS domain age
@@ -297,8 +347,6 @@ def analyze_url(url: str) -> dict:
 
     # ============================================================
     # Optional Stage 4: Page content rules
-    # Если core/page_rules.py существует, подключаем его автоматически.
-    # Если нет — приложение всё равно работает.
     # ============================================================
 
     if analyze_page_rules is not None:
