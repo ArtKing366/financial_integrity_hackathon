@@ -9,7 +9,7 @@ Manifest V3 extension that highlights links on the current page with a quick loc
   - red: dangerous
   - amber: suspicious
   - green: safe
-  - gray: unknown or unsupported
+  - gray: not found, unknown, or unsupported
 - Shows a hover tooltip with the reasons.
 - Opens the Streamlit SignalShield analyzer when a highlighted link is clicked.
 
@@ -43,4 +43,5 @@ The extension uses lightweight browser-side heuristics for real-time feedback. T
 
 - The extension does not call the Python engine for every link, so it stays fast and does not need a backend API.
 - Click-through opens `http://localhost:8501/?mode=link&url=...&auto=1`, which pre-fills and runs the existing full analyzer.
-- Safe-link highlighting and click interception can be changed in the popup.
+- Safe-link highlighting, NOT_FOUND highlighting, and click interception can be changed in the popup.
+- The Save button stores settings and reloads the active page so the new highlighting rules apply immediately.

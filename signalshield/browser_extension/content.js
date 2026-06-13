@@ -4,7 +4,8 @@
   const DEFAULT_CONFIG = {
     analyzerBaseUrl: "http://localhost:8501/",
     openAnalyzerOnClick: true,
-    highlightSafeLinks: true
+    highlightSafeLinks: true,
+    highlightNotFoundLinks: true
   };
 
   const TRUSTED_DOMAINS = [
@@ -119,6 +120,7 @@
       dangerous: 0,
       suspicious: 0,
       safe: 0,
+      not_found: 0,
       unknown: 0
     },
     scanTimer: null
@@ -233,9 +235,9 @@
 
     if (!parts || !parts.url.protocol.startsWith("http")) {
       return {
-        verdict: "unknown",
+        verdict: "not_found",
         score: 0,
-        reasons: ["Unsupported or invalid URL."],
+        reasons: ["Unsupported, invalid, or non-web URL."],
         url: href,
         registeredDomain: ""
       };
@@ -352,19 +354,58 @@
     return url.href;
   }
 
+  function shouldIgnoreLink(anchor) {
+    return Boolean(anchor.closest(
+      '[data-ss-ignore="1"], [data-signalshield-ignore="1"], .ss-ignore, .ss-no-extension'
+    ));
+  }
+
+  function clearSignalShieldData(anchor) {
+    for (const key of [
+      "ssAnalyzed",
+      "ssRawVerdict",
+      "ssScore",
+      "ssReasons",
+      "ssUrl",
+      "ssDomain",
+      "ssVerdict"
+    ]) {
+      delete anchor.dataset[key];
+    }
+
+    if ((anchor.getAttribute("aria-label") || "").startsWith("SignalShield:")) {
+      anchor.removeAttribute("aria-label");
+    }
+  }
+
   function annotateLink(anchor) {
-    if (!anchor.href || anchor.dataset.ssAnalyzed === "1") {
+    if (!anchor.href) {
+      return;
+    }
+
+    if (shouldIgnoreLink(anchor)) {
+      clearSignalShieldData(anchor);
+      return;
+    }
+
+    if (anchor.dataset.ssAnalyzed === "1") {
       return;
     }
 
     const result = classifyHref(anchor.href);
     anchor.dataset.ssAnalyzed = "1";
+    anchor.dataset.ssRawVerdict = result.verdict;
     anchor.dataset.ssScore = String(result.score);
     anchor.dataset.ssReasons = JSON.stringify(result.reasons);
     anchor.dataset.ssUrl = result.url;
     anchor.dataset.ssDomain = result.registeredDomain || "";
 
     if (result.verdict === "safe" && !state.config.highlightSafeLinks) {
+      delete anchor.dataset.ssVerdict;
+      return;
+    }
+
+    if (result.verdict === "not_found" && !state.config.highlightNotFoundLinks) {
       delete anchor.dataset.ssVerdict;
       return;
     }
@@ -390,6 +431,7 @@
       dangerous: 0,
       suspicious: 0,
       safe: 0,
+      not_found: 0,
       unknown: 0
     };
   }
@@ -398,13 +440,18 @@
     resetStats();
 
     for (const anchor of document.querySelectorAll("a[href]")) {
+      if (shouldIgnoreLink(anchor)) {
+        clearSignalShieldData(anchor);
+        continue;
+      }
+
       if (anchor.dataset.ssAnalyzed === "1") {
         delete anchor.dataset.ssAnalyzed;
       }
       annotateLink(anchor);
 
       state.stats.scanned += 1;
-      const verdict = anchor.dataset.ssVerdict || "safe";
+      const verdict = anchor.dataset.ssRawVerdict || anchor.dataset.ssVerdict || "safe";
 
       if (Object.prototype.hasOwnProperty.call(state.stats, verdict)) {
         state.stats[verdict] = (state.stats[verdict] || 0) + 1;
@@ -432,6 +479,11 @@
 
   function showTooltip(event) {
     const anchor = event.currentTarget;
+
+    if (shouldIgnoreLink(anchor) || !anchor.dataset.ssVerdict) {
+      return;
+    }
+
     const reasons = JSON.parse(anchor.dataset.ssReasons || "[]");
     const verdict = anchor.dataset.ssVerdict || "unknown";
     const score = anchor.dataset.ssScore || "0";
@@ -464,6 +516,10 @@
   }
 
   function handleClick(event) {
+    if (shouldIgnoreLink(event.currentTarget)) {
+      return;
+    }
+
     if (!state.config.openAnalyzerOnClick) {
       return;
     }

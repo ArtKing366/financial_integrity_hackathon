@@ -1,3 +1,5 @@
+import html as html_lib
+
 import streamlit as st
 
 from core.message_analyzer import analyze_message
@@ -363,6 +365,84 @@ def render_verdict_banner(result: dict, not_found_label: str = "Page not found")
         st.success(f"✅ {result['verdict']}")
 
 
+def render_external_link_button(label: str, url: str, button_type: str = "primary") -> None:
+    safe_url = html_lib.escape(url, quote=True)
+    safe_label = html_lib.escape(label)
+    background = "#111827" if button_type == "primary" else "#334155"
+
+    st.markdown(
+        (
+            f'<a href="{safe_url}" target="_blank" rel="noopener noreferrer" data-ss-ignore="1" '
+            'data-signalshield-ignore="1" class="ss-navigation-link" '
+            'style="display:inline-block;padding:0.5rem 0.85rem;'
+            f'border-radius:0.45rem;background:{background};color:white;'
+            'text-decoration:none;font-weight:700;">'
+            f"{safe_label}</a>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def clear_pending_navigation() -> None:
+    st.session_state.pop("pending_navigation_url", None)
+    st.session_state.pop("pending_navigation_verdict", None)
+
+
+def rerun_app() -> None:
+    if hasattr(st, "rerun"):
+        st.rerun()
+    else:
+        st.experimental_rerun()
+
+
+def render_navigation_warning(url: str, verdict: str) -> None:
+    warning_text = (
+        f"This page was classified as {verdict}. It may be phishing, unreachable, "
+        "or otherwise unsafe. Open it only if you trust the destination."
+    )
+
+    if hasattr(st, "dialog"):
+        @st.dialog("Open checked page?")
+        def warning_dialog() -> None:
+            st.warning(warning_text)
+            st.caption(url)
+            render_external_link_button("Open anyway", url)
+            if st.button("Cancel"):
+                clear_pending_navigation()
+                rerun_app()
+
+        warning_dialog()
+        return
+
+    st.warning(warning_text)
+    st.caption(url)
+    render_external_link_button("Open anyway", url)
+
+
+def render_open_checked_page(result: dict) -> None:
+    details = result.get("details", {})
+    target_url = details.get("input_url")
+
+    if not target_url:
+        return
+
+    verdict = result.get("verdict", "")
+
+    if verdict == VERDICT_SAFE:
+        render_external_link_button("Open checked page", target_url)
+        return
+
+    if st.button("Open checked page"):
+        st.session_state["pending_navigation_url"] = target_url
+        st.session_state["pending_navigation_verdict"] = verdict
+
+    if st.session_state.get("pending_navigation_url") == target_url:
+        render_navigation_warning(
+            st.session_state["pending_navigation_url"],
+            st.session_state.get("pending_navigation_verdict", verdict),
+        )
+
+
 def render_reasons(result: dict) -> None:
     if not result.get("reasons"):
         return
@@ -512,6 +592,7 @@ if mode == "Single link":
 
         render_verdict_banner(result)
         render_reasons(result)
+        render_open_checked_page(result)
 
         with st.expander("Technical details", expanded=True):
             render_technical_details(result)

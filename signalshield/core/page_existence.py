@@ -76,7 +76,6 @@ def check_page_existence(url: str) -> dict:
         result["evidence"].append("URL is empty or invalid.")
         return result
 
-    # 1. DNS check
     dns_exists, dns_error = check_dns_exists(hostname)
     result["domain_exists"] = dns_exists
 
@@ -92,7 +91,6 @@ def check_page_existence(url: str) -> dict:
 
     result["evidence"].append("DNS lookup succeeded: domain resolves to an IP address.")
 
-    # 2. HTTP check
     try:
         response = requests.get(
             url,
@@ -120,7 +118,6 @@ def check_page_existence(url: str) -> dict:
                 f"URL redirected to final URL: {result['final_url']}."
             )
 
-        # Page does not exist
         if status == 404:
             result["status"] = "not_found"
             result["exists"] = False
@@ -135,7 +132,6 @@ def check_page_existence(url: str) -> dict:
             result["evidence"].append("HTTP status 410: page is gone.")
             return result
 
-        # Page exists
         if 200 <= status < 400:
             result["status"] = "exists"
             result["exists"] = True
@@ -145,7 +141,6 @@ def check_page_existence(url: str) -> dict:
             )
             return result
 
-        # Page exists, but access is restricted
         if status in [401, 403, 429]:
             result["status"] = "exists"
             result["exists"] = True
@@ -155,7 +150,6 @@ def check_page_existence(url: str) -> dict:
             )
             return result
 
-        # Other 4xx errors
         if 400 <= status < 500:
             result["status"] = "unknown"
             result["exists"] = None
@@ -165,7 +159,6 @@ def check_page_existence(url: str) -> dict:
             )
             return result
 
-        # Server errors
         if 500 <= status < 600:
             result["status"] = "unknown"
             result["exists"] = None
