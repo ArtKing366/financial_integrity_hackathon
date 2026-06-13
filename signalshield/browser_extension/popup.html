@@ -34,11 +34,30 @@
           <strong id="notFound">0</strong>
           <span>not found</span>
         </div>
+        <div class="trusted">
+          <strong id="trusted">0</strong>
+          <span>trusted</span>
+        </div>
+      </section>
+
+      <section id="analysisState" class="analysis-state" aria-live="polite">
+        <strong id="analysisLabel">Quick JS check</strong>
+        <span id="analysisDetail">Open a page to see analysis status.</span>
       </section>
 
       <label>
         Analyzer URL
         <input id="analyzerBaseUrl" type="url" placeholder="http://localhost:8501/">
+      </label>
+
+      <label>
+        Local API URL
+        <input id="apiBaseUrl" type="url" placeholder="http://127.0.0.1:8766/">
+      </label>
+
+      <label class="check">
+        <input id="useDeepAnalysis" type="checkbox">
+        Use local Python deep analysis and analytics
       </label>
 
       <label class="check">

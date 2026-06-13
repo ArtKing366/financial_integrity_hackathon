@@ -1,5 +1,7 @@
 import json
+from functools import lru_cache
 from pathlib import Path
+from typing import Any, Callable
 
 from core.domain_utils import extract_hostname, extract_registered_domain, normalize_url
 
@@ -8,6 +10,15 @@ VERDICT_DANGEROUS = "DANGEROUS"
 VERDICT_SUSPICIOUS = "SUSPICIOUS"
 VERDICT_SAFE = "SAFE"
 VERDICT_NOT_FOUND = "NOT_FOUND"
+VERDICT_TRUSTED_BY_USER = "TRUSTED_BY_USER"
+
+
+try:
+    from core.local_db import LIST_BLACKLIST, LIST_TRUSTED, find_list_match
+except Exception:
+    LIST_BLACKLIST = "blacklist"
+    LIST_TRUSTED = "trusted"
+    find_list_match = None
 
 
 try:
@@ -41,14 +52,16 @@ except Exception:
     check_similarity = None
 
 try:
-    from core.page_rules import analyze_page_rules
+    from core.page_rules import analyze_page_rules, fetch_page as fetch_page_for_rules
 except Exception:
     analyze_page_rules = None
+    fetch_page_for_rules = None
 
 try:
-    from core.html_crawler import analyze_html_crawling
+    from core.html_crawler import analyze_html_crawling, fetch_html as fetch_html_for_crawler
 except Exception:
     analyze_html_crawling = None
+    fetch_html_for_crawler = None
 
 try:
     from core.url_heuristics import analyze_url_heuristics
@@ -61,6 +74,7 @@ except Exception:
     check_domain_entropy = None
 
 
+@lru_cache(maxsize=1)
 def load_trusted_brands() -> list[str]:
     project_root = Path(__file__).resolve().parents[1]
     trusted_path = project_root / "data" / "trusted_brands.json"
@@ -87,12 +101,35 @@ def load_trusted_brands() -> list[str]:
         return []
 
 
-def run_similarity_check(domain: str) -> list:
+def new_analysis_context() -> dict[str, Any]:
+    return {
+        "trusted_brands": load_trusted_brands(),
+        "cache": {},
+    }
+
+
+def cache_get(
+    context: dict[str, Any],
+    cache_name: str,
+    key: str,
+    factory: Callable[[], Any],
+) -> Any:
+    cache = context.setdefault("cache", {}).setdefault(cache_name, {})
+
+    if key not in cache:
+        cache[key] = factory()
+
+    return cache[key]
+
+
+def run_similarity_check(domain: str, trusted_brands: list[str] | None = None) -> list:
     if check_similarity is None:
         return []
 
+    trusted_brands = trusted_brands if trusted_brands is not None else load_trusted_brands()
+
     try:
-        return check_similarity(domain, load_trusted_brands())
+        return check_similarity(domain, trusted_brands)
     except TypeError:
         try:
             return check_similarity(domain)
@@ -139,11 +176,55 @@ def format_similarity_reason(similarity_results: list) -> str:
     return f"Domain is similar to a trusted brand: {best_match}."
 
 
+def fetch_html_for_content_rules(url: str, context: dict[str, Any]) -> tuple[str | None, str | None]:
+    fetcher = fetch_page_for_rules or fetch_html_for_crawler
+
+    if fetcher is None:
+        return None, "Page fetch module is not available."
+
+    return cache_get(
+        context,
+        "html_fetch",
+        url,
+        lambda: fetcher(url),
+    )
+
+
+def call_html_crawling(
+    url: str,
+    trusted_brands: list[str],
+    html: str | None,
+    fetch_error: str | None,
+) -> dict:
+    try:
+        return analyze_html_crawling(
+            url,
+            trusted_brands,
+            html=html,
+            fetch_error=fetch_error,
+        )
+    except TypeError:
+        return analyze_html_crawling(url, trusted_brands)
+
+
+def call_page_rules(
+    url: str,
+    html: str | None,
+    fetch_error: str | None,
+) -> dict:
+    try:
+        return analyze_page_rules(url, html=html, fetch_error=fetch_error)
+    except TypeError:
+        return analyze_page_rules(url)
+
+
 def _details(url: str, hostname: str, domain: str) -> dict:
     return {
         "input_url": url,
         "hostname": hostname,
         "domain": domain,
+        "local_list_match": None,
+        "original_verdict": None,
         "blacklist_match": False,
         "subdomain_spoofing": None,
         "page_existence": None,
@@ -156,7 +237,9 @@ def _details(url: str, hostname: str, domain: str) -> dict:
     }
 
 
-def analyze_url(url: str) -> dict:
+def analyze_url(url: str, context: dict[str, Any] | None = None) -> dict:
+    context = context or new_analysis_context()
+    trusted_brands = context["trusted_brands"]
     url = normalize_url(url)
     hostname = extract_hostname(url)
     domain = extract_registered_domain(url)
@@ -173,10 +256,42 @@ def analyze_url(url: str) -> dict:
     risk_score = 0
     reasons = []
     not_found_reasons = []
+    trusted_match = None
+
+    if find_list_match is not None:
+        try:
+            local_match = cache_get(
+                context,
+                "local_list_match",
+                url,
+                lambda: find_list_match(url),
+            )
+        except Exception:
+            local_match = None
+
+        details["local_list_match"] = local_match
+
+        if local_match and local_match.get("list_type") == LIST_BLACKLIST:
+            return {
+                "verdict": VERDICT_DANGEROUS,
+                "score": 100,
+                "reasons": [
+                    "URL or domain is on the local SignalShield blacklist."
+                ],
+                "details": details,
+            }
+
+        if local_match and local_match.get("list_type") == LIST_TRUSTED:
+            trusted_match = local_match
 
     if check_blacklist is not None:
         try:
-            is_blacklisted = check_blacklist(url)
+            is_blacklisted = cache_get(
+                context,
+                "blacklist",
+                domain or url,
+                lambda: check_blacklist(url),
+            )
         except Exception:
             is_blacklisted = False
 
@@ -196,7 +311,12 @@ def analyze_url(url: str) -> dict:
 
     if check_subdomain_spoofing is not None:
         try:
-            subdomain_result = check_subdomain_spoofing(url)
+            subdomain_result = cache_get(
+                context,
+                "subdomain_spoofing",
+                hostname,
+                lambda: check_subdomain_spoofing(url),
+            )
         except Exception as error:
             subdomain_result = {"is_spoofed": False, "error": str(error)}
 
@@ -214,7 +334,12 @@ def analyze_url(url: str) -> dict:
 
     if check_page_existence is not None:
         try:
-            existence_result = check_page_existence(url)
+            existence_result = cache_get(
+                context,
+                "page_existence",
+                url,
+                lambda: check_page_existence(url),
+            )
         except Exception as error:
             existence_result = {
                 "status": "unknown",
@@ -237,7 +362,12 @@ def analyze_url(url: str) -> dict:
 
     if analyze_dns_infrastructure is not None:
         try:
-            dns_result = analyze_dns_infrastructure(domain, load_trusted_brands())
+            dns_result = cache_get(
+                context,
+                "dns_infrastructure",
+                domain,
+                lambda: analyze_dns_infrastructure(domain, trusted_brands),
+            )
         except Exception as error:
             dns_result = {
                 "score": 0,
@@ -257,7 +387,12 @@ def analyze_url(url: str) -> dict:
 
     if get_domain_age is not None:
         try:
-            age_days = get_domain_age(domain)
+            age_days = cache_get(
+                context,
+                "domain_age",
+                domain,
+                lambda: get_domain_age(domain),
+            )
         except Exception:
             age_days = None
 
@@ -276,7 +411,12 @@ def analyze_url(url: str) -> dict:
 
     if check_domain_entropy is not None:
         try:
-            entropy_result = check_domain_entropy(url)
+            entropy_result = cache_get(
+                context,
+                "domain_entropy",
+                domain,
+                lambda: check_domain_entropy(url),
+            )
         except Exception as error:
             entropy_result = {
                 "flagged": False,
@@ -292,9 +432,31 @@ def analyze_url(url: str) -> dict:
     else:
         details["domain_entropy"] = "Domain entropy module is not available."
 
+    content_html = None
+    content_fetch_error = None
+
+    if (
+        (analyze_html_crawling is not None or analyze_page_rules is not None)
+        and not_found_reasons
+        and details.get("page_existence", {}).get("status") == "domain_not_found"
+    ):
+        content_fetch_error = "Skipped page content checks because DNS lookup failed."
+    elif analyze_html_crawling is not None or analyze_page_rules is not None:
+        content_html, content_fetch_error = fetch_html_for_content_rules(url, context)
+
     if analyze_html_crawling is not None:
         try:
-            html_result = analyze_html_crawling(url, load_trusted_brands())
+            html_result = cache_get(
+                context,
+                "html_crawling",
+                url,
+                lambda: call_html_crawling(
+                    url,
+                    trusted_brands,
+                    content_html,
+                    content_fetch_error,
+                ),
+            )
         except Exception as error:
             html_result = {
                 "score": 0,
@@ -314,7 +476,12 @@ def analyze_url(url: str) -> dict:
 
     if analyze_url_heuristics is not None:
         try:
-            heuristic_result = analyze_url_heuristics(url, load_trusted_brands())
+            heuristic_result = cache_get(
+                context,
+                "url_heuristics",
+                url,
+                lambda: analyze_url_heuristics(url, trusted_brands),
+            )
         except Exception as error:
             heuristic_result = {
                 "score": 0,
@@ -332,7 +499,12 @@ def analyze_url(url: str) -> dict:
     else:
         details["url_heuristics"] = "URL heuristic module is not available."
 
-    similarity_results = run_similarity_check(domain)
+    similarity_results = cache_get(
+        context,
+        "similarity",
+        domain,
+        lambda: run_similarity_check(domain, trusted_brands),
+    )
     details["similarity_results"] = similarity_results
 
     if similarity_results:
@@ -342,7 +514,12 @@ def analyze_url(url: str) -> dict:
 
     if analyze_page_rules is not None:
         try:
-            page_result = analyze_page_rules(url)
+            page_result = cache_get(
+                context,
+                "page_rules",
+                url,
+                lambda: call_page_rules(url, content_html, content_fetch_error),
+            )
         except Exception as error:
             page_result = {
                 "score": 0,
@@ -385,9 +562,23 @@ def analyze_url(url: str) -> dict:
     elif not_found_reasons:
         details["not_found_evidence"] = not_found_reasons
 
-    return {
+    result = {
         "verdict": verdict,
         "score": risk_score,
         "reasons": reasons,
         "details": details,
     }
+
+    if trusted_match:
+        details["original_verdict"] = verdict
+        result["verdict"] = VERDICT_TRUSTED_BY_USER
+        result["reasons"] = [
+            (
+                "User trusted list matched "
+                f"{trusted_match.get('scope')} {trusted_match.get('value')}."
+            ),
+            f"Original analyzer verdict was {verdict} with {risk_score}% risk.",
+            *reasons,
+        ]
+
+    return result

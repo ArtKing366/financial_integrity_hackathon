@@ -234,7 +234,11 @@ def has_long_query_parameter(url: str) -> bool:
     return False
 
 
-def analyze_page_rules(url: str) -> dict:
+def analyze_page_rules(
+    url: str,
+    html: str | None = None,
+    fetch_error: str | None = None,
+) -> dict:
     """
     Analyze page content with rules inspired by CyberDrain/Check.
 
@@ -292,7 +296,10 @@ def analyze_page_rules(url: str) -> dict:
         })
         return result
 
-    html, error = fetch_page(url)
+    error = fetch_error
+
+    if html is None and error is None:
+        html, error = fetch_page(url)
 
     if error:
         result["fetch_error"] = error

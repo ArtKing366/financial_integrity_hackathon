@@ -2,6 +2,20 @@ import html as html_lib
 
 import streamlit as st
 
+from core.local_db import (
+    LIST_BLACKLIST,
+    LIST_TRUSTED,
+    SCOPE_DOMAIN,
+    SCOPE_URL,
+    add_list_entry,
+    deactivate_list_entry,
+    expiry_from_choice,
+    list_entries,
+    recent_scan_events,
+    record_scan_event,
+    summarize_page_domains,
+    summarize_verdicts,
+)
 from core.message_analyzer import analyze_message
 from core.verdict import (
     VERDICT_DANGEROUS,
@@ -10,6 +24,9 @@ from core.verdict import (
     VERDICT_SUSPICIOUS,
     analyze_url,
 )
+
+
+VERDICT_TRUSTED_BY_USER = "TRUSTED_BY_USER"
 
 
 def format_value(value) -> str:
@@ -112,6 +129,18 @@ def render_stage_section(
 def build_overview_rows(result: dict) -> list[dict[str, str]]:
     details = result.get("details", {})
     rows = []
+
+    local_match = details.get("local_list_match")
+    if isinstance(local_match, dict):
+        rows.append({
+            "Check": "Local list",
+            "Status": local_match.get("list_type", "matched"),
+            "Risk": "+100" if local_match.get("list_type") == LIST_BLACKLIST else "+0",
+            "Meaning": (
+                f"{local_match.get('scope')} match: {local_match.get('value')}. "
+                f"Original verdict: {format_value(details.get('original_verdict'))}."
+            ),
+        })
 
     blacklist_match = details.get("blacklist_match")
     rows.append({
@@ -359,6 +388,8 @@ def render_verdict_banner(result: dict, not_found_label: str = "Page not found")
         st.error(f"⛔ {result['verdict']} (risk: {result['score']}%)")
     elif result["verdict"] == VERDICT_SUSPICIOUS:
         st.warning(f"⚠️ {result['verdict']} (risk: {result['score']}%)")
+    elif result["verdict"] == VERDICT_TRUSTED_BY_USER:
+        st.info(f"{result['verdict']} (original risk: {result['score']}%)")
     elif result["verdict"] == VERDICT_NOT_FOUND:
         st.info(not_found_label)
     else:
@@ -441,6 +472,184 @@ def render_open_checked_page(result: dict) -> None:
             st.session_state["pending_navigation_url"],
             st.session_state.get("pending_navigation_verdict", verdict),
         )
+
+
+def scope_from_label(label: str) -> str:
+    return SCOPE_URL if label == "Exact URL" else SCOPE_DOMAIN
+
+
+def value_for_scope(url: str, hostname: str, scope: str) -> str:
+    return url if scope == SCOPE_URL else hostname
+
+
+def render_result_list_actions(result: dict) -> None:
+    details = result.get("details", {})
+    target_url = details.get("input_url", "")
+    hostname = details.get("hostname", "")
+
+    if not target_url or not hostname:
+        return
+
+    with st.expander("Local list action"):
+        if result.get("verdict") in {VERDICT_DANGEROUS, VERDICT_SUSPICIOUS}:
+            st.warning(
+                "Adding a risky site to the trusted list makes it blue, "
+                "but the original risk remains visible in technical details."
+            )
+
+        with st.form("result_list_action"):
+            action = st.radio(
+                "Action",
+                ["Trust this target", "Block this target"],
+                horizontal=True,
+            )
+            scope_label = st.radio(
+                "Scope",
+                ["Exact URL", "Exact hostname"],
+                horizontal=True,
+            )
+            expiry_choice = st.selectbox(
+                "Expires",
+                ["Never", "24 hours", "7 days", "30 days"],
+                index=0,
+            )
+            note = st.text_input("Note", placeholder="Optional reason")
+            submitted = st.form_submit_button("Save to local list")
+
+        if submitted:
+            scope = scope_from_label(scope_label)
+            list_type = LIST_TRUSTED if action == "Trust this target" else LIST_BLACKLIST
+            value = value_for_scope(target_url, hostname, scope)
+            entry = add_list_entry(
+                list_type,
+                scope,
+                value,
+                label=action,
+                note=note,
+                expires_at=expiry_from_choice(expiry_choice),
+            )
+            st.success(f"Saved {entry['list_type']} entry: {entry['scope']} {entry['value']}")
+
+
+def list_type_label(list_type: str) -> str:
+    if list_type == LIST_BLACKLIST:
+        return "Blacklist"
+    return "Trusted list"
+
+
+def render_lists_page() -> None:
+    st.header("Local lists")
+    st.caption("Entries match only exact URLs or exact hostnames. Subdomains are not trusted automatically.")
+
+    with st.form("manual_list_entry"):
+        list_label = st.radio(
+            "List",
+            ["Trusted list", "Blacklist"],
+            horizontal=True,
+        )
+        scope_label = st.radio(
+            "Scope",
+            ["Exact URL", "Exact hostname"],
+            horizontal=True,
+        )
+        value = st.text_input("URL or hostname")
+        expiry_choice = st.selectbox(
+            "Expires",
+            ["Never", "24 hours", "7 days", "30 days"],
+            index=0,
+        )
+        note = st.text_input("Note", placeholder="Optional reason")
+        submitted = st.form_submit_button("Add entry")
+
+    if submitted:
+        list_type = LIST_TRUSTED if list_label == "Trusted list" else LIST_BLACKLIST
+        entry = add_list_entry(
+            list_type,
+            scope_from_label(scope_label),
+            value,
+            label=list_label,
+            note=note,
+            expires_at=expiry_from_choice(expiry_choice),
+        )
+        st.success(f"Saved {entry['list_type']} entry: {entry['scope']} {entry['value']}")
+
+    entries = list_entries()
+
+    if not entries:
+        st.info("No local list entries yet.")
+        return
+
+    st.markdown("#### Active entries")
+    st.dataframe(
+        [
+            {
+                "id": entry["id"],
+                "list": list_type_label(entry["list_type"]),
+                "scope": entry["scope"],
+                "value": entry["value"],
+                "expires_at": entry.get("expires_at") or "Never",
+                "note": entry.get("note", ""),
+            }
+            for entry in entries
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.markdown("#### Remove entry")
+    entry_options = {
+        f"{entry['id']} - {list_type_label(entry['list_type'])}: {entry['scope']} {entry['value']}": entry["id"]
+        for entry in entries
+    }
+    selected = st.selectbox("Entry", list(entry_options.keys()))
+
+    if st.button("Deactivate selected entry"):
+        deactivate_list_entry(entry_options[selected])
+        st.success("Entry deactivated.")
+        rerun_app()
+
+
+def render_analytics_page() -> None:
+    st.header("Service analytics")
+
+    verdicts = summarize_verdicts()
+    total = sum(verdicts.values())
+    metric_cols = st.columns(6)
+    metric_cols[0].metric("Checked links", total)
+    metric_cols[1].metric("Dangerous", verdicts.get(VERDICT_DANGEROUS, 0))
+    metric_cols[2].metric("Suspicious", verdicts.get(VERDICT_SUSPICIOUS, 0))
+    metric_cols[3].metric("Safe", verdicts.get(VERDICT_SAFE, 0))
+    metric_cols[4].metric("Not found", verdicts.get(VERDICT_NOT_FOUND, 0))
+    metric_cols[5].metric("Trusted", verdicts.get(VERDICT_TRUSTED_BY_USER, 0))
+
+    page_rows = summarize_page_domains()
+    st.markdown("#### Page domains")
+    if page_rows:
+        st.dataframe(page_rows, use_container_width=True, hide_index=True)
+    else:
+        st.info("No scan events recorded yet.")
+
+    recent_rows = recent_scan_events(100)
+    st.markdown("#### Recent checks")
+    if recent_rows:
+        st.dataframe(
+            [
+                {
+                    "created_at": row["created_at"],
+                    "page_domain": row["page_domain"] or "manual",
+                    "target_domain": row["target_domain"],
+                    "verdict": row["verdict"],
+                    "score": row["score"],
+                    "source": row["source"],
+                    "target_url": row["target_url"],
+                }
+                for row in recent_rows
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.info("No recent checks yet.")
 
 
 def render_reasons(result: dict) -> None:
@@ -568,11 +777,16 @@ st.subheader("Check financial scam risk before you pay")
 query_url = get_query_param("url")
 query_mode = get_query_param("mode")
 query_auto = get_query_param("auto").lower() in {"1", "true", "yes"}
-mode_options = ["Single link", "Full message"]
+mode_options = ["Single link", "Full message", "Lists", "Analytics"]
 default_mode_index = 1 if query_mode == "message" else 0
 
+if query_mode == "lists":
+    default_mode_index = 2
+elif query_mode == "analytics":
+    default_mode_index = 3
+
 mode = st.radio(
-    "Analysis mode",
+    "View",
     mode_options,
     index=default_mode_index,
     horizontal=True,
@@ -589,15 +803,17 @@ if mode == "Single link":
     if should_analyze_link and url:
         with st.spinner("Analyzing link..."):
             result = analyze_url(url)
+            record_scan_event(url, result, source="streamlit")
 
         render_verdict_banner(result)
         render_reasons(result)
         render_open_checked_page(result)
+        render_result_list_actions(result)
 
         with st.expander("Technical details", expanded=True):
             render_technical_details(result)
 
-else:
+elif mode == "Full message":
     message = st.text_area(
         "Paste the full SMS, email, or chat message:",
         height=180,
@@ -610,12 +826,24 @@ else:
     if st.button("Analyze message") and message:
         with st.spinner("Analyzing message and all detected links..."):
             result = analyze_message(message)
+            for link in result.get("links", []):
+                record_scan_event(
+                    link.get("url", ""),
+                    link.get("analysis", link),
+                    source="streamlit_message",
+                )
 
         render_verdict_banner(result, not_found_label="Message is empty or could not be analyzed")
         render_reasons(result)
 
         with st.expander("Message analysis details", expanded=True):
             render_message_details(result)
+
+elif mode == "Lists":
+    render_lists_page()
+
+else:
+    render_analytics_page()
 
 st.divider()
 st.caption(

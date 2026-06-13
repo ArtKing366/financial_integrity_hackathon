@@ -130,7 +130,12 @@ def detect_sensitive_markers(html: str) -> list[str]:
     return sorted(set(matched))
 
 
-def analyze_html_crawling(url: str, trusted_domains: list[str]) -> dict:
+def analyze_html_crawling(
+    url: str,
+    trusted_domains: list[str],
+    html: str | None = None,
+    fetch_error: str | None = None,
+) -> dict:
     url = normalize_url(url)
     registered_domain = extract_registered_domain(url)
 
@@ -145,7 +150,10 @@ def analyze_html_crawling(url: str, trusted_domains: list[str]) -> dict:
         "fetch_error": None,
     }
 
-    html, error = fetch_html(url)
+    error = fetch_error
+
+    if html is None and error is None:
+        html, error = fetch_html(url)
 
     if error:
         result["fetch_error"] = error
