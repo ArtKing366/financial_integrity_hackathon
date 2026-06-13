@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SignalShield</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>SignalShield</h1>
+        <p>Real-time link highlighting for the current page.</p>
+      </header>
+
+      <section class="stats" aria-live="polite">
+        <div>
+          <strong id="scanned">0</strong>
+          <span>scanned</span>
+        </div>
+        <div class="danger">
+          <strong id="dangerous">0</strong>
+          <span>dangerous</span>
+        </div>
+        <div class="warn">
+          <strong id="suspicious">0</strong>
+          <span>suspicious</span>
+        </div>
+        <div class="safe">
+          <strong id="safe">0</strong>
+          <span>safe</span>
+        </div>
+      </section>
+
+      <label>
+        Analyzer URL
+        <input id="analyzerBaseUrl" type="url" placeholder="http://localhost:8501/">
+      </label>
+
+      <label class="check">
+        <input id="openAnalyzerOnClick" type="checkbox">
+        Open SignalShield when a highlighted link is clicked
+      </label>
+
+      <label class="check">
+        <input id="highlightSafeLinks" type="checkbox">
+        Highlight safe links in green
+      </label>
+
+      <div class="actions">
+        <button id="save">Save</button>
+        <button id="rescan">Rescan page</button>
+      </div>
+
+      <p id="status" role="status"></p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
