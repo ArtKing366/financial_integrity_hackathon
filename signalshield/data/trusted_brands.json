@@ -1,0 +1,22 @@
+{
+  "banks": [
+    "mbank.pl",
+    "pko-bp.pl",
+    "santander.pl",
+    "ing.pl",
+    "millennium.pl",
+    "pekao.com.pl",
+    "aliorbank.pl"
+  ],
+  "shopping": [
+    "allegro.pl",
+    "olx.pl",
+    "vinted.pl"
+  ],
+  "delivery": [
+    "inpost.pl",
+    "dpd.com.pl",
+    "dhl.com",
+    "poczta-polska.pl"
+  ]
+}
