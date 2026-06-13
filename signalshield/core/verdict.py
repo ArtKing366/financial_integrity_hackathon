@@ -26,6 +26,11 @@ except Exception:
     check_page_existence = None
 
 try:
+    from core.dns_infrastructure import analyze_dns_infrastructure
+except Exception:
+    analyze_dns_infrastructure = None
+
+try:
     from core.whois_check import get_domain_age
 except Exception:
     get_domain_age = None
@@ -132,6 +137,7 @@ def _details(url: str, hostname: str, domain: str) -> dict:
         "blacklist_match": False,
         "subdomain_spoofing": None,
         "page_existence": None,
+        "dns_infrastructure": None,
         "domain_age_days": None,
         "similarity_results": [],
         "url_heuristics": None,
@@ -216,6 +222,26 @@ def analyze_url(url: str) -> dict:
             reasons.extend(existence_result.get("evidence", []))
     else:
         details["page_existence"] = "Page existence module is not available."
+
+    if analyze_dns_infrastructure is not None:
+        try:
+            dns_result = analyze_dns_infrastructure(domain, load_trusted_brands())
+        except Exception as error:
+            dns_result = {
+                "score": 0,
+                "status": "error",
+                "description": "",
+                "error": str(error),
+            }
+
+        details["dns_infrastructure"] = dns_result
+        risk_score += int(dns_result.get("score", 0) or 0)
+
+        description = dns_result.get("description", "")
+        if description and dns_result.get("score", 0) > 0:
+            reasons.append(description)
+    else:
+        details["dns_infrastructure"] = "DNS infrastructure module is not available."
 
     if get_domain_age is not None:
         try:

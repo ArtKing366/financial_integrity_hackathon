@@ -11,6 +11,7 @@ signalshield/
 |   |-- blacklist.py       # Stage 1 - CERT Polska blacklist
 |   |-- subdomain_spoofing.py
 |   |-- page_existence.py
+|   |-- dns_infrastructure.py
 |   |-- whois_check.py     # Domain age via WHOIS
 |   |-- url_heuristics.py  # Path keywords and domain ugliness rules
 |   |-- similarity.py      # Typosquatting and brand mimicry
@@ -34,10 +35,11 @@ Independent check modules feed a single `analyze_url()` API. The same API can po
 1. **blacklist** - O(1) lookup against the CERT Polska list, with a local cache and offline demo fallback.
 2. **subdomain_spoofing** - catches URLs such as `mbank.pl.secure-pay.com`, where the trusted brand is only in the subdomain.
 3. **page_existence** - separates missing domains/pages from reachable pages without overriding stronger phishing signals.
-4. **whois_check** - uses domain registration age when WHOIS data is available.
-5. **url_heuristics** - checks suspicious path keywords on untrusted domains and unusually long or hyphen-heavy domains.
-6. **similarity** - detects typosquatting, brand substrings, and homograph attacks against trusted brands.
-7. **page_rules** - optional content rules for Microsoft-like login pages and credential forms.
+4. **dns_infrastructure** - checks whether untrusted domains resolve and have MX records configured.
+5. **whois_check** - uses domain registration age when WHOIS data is available.
+6. **url_heuristics** - checks suspicious path keywords on untrusted domains and unusually long or hyphen-heavy domains.
+7. **similarity** - detects typosquatting, brand substrings, and homograph attacks against trusted brands.
+8. **page_rules** - optional content rules for Microsoft-like login pages and credential forms.
 
 Verdict thresholds: score >= 50 -> DANGEROUS, score >= 20 -> SUSPICIOUS, else SAFE.
 
