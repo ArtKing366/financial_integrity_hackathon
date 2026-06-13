@@ -1,0 +1,12 @@
+from src.cert_checker import download_blacklist, check_blacklist
+
+
+blacklist = download_blacklist(force=True)
+
+print(f"Liczba domen w blacklist: {len(blacklist)}")
+
+examples = list(blacklist)[:3]
+
+for domain in examples:
+    result = check_blacklist(domain)
+    print(domain, result)
