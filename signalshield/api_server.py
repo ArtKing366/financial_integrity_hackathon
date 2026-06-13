@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from core.analysis_cache import TtlCache
 from core.local_db import (
     add_list_entry,
     expiry_from_choice,
@@ -16,12 +18,14 @@ from core.local_db import (
     summarize_page_domains,
     summarize_verdicts,
 )
-from core.domain_utils import normalize_url
+from core.domain_utils import extract_registered_domain, normalize_url
 from core.verdict import analyze_url, new_analysis_context
 
 
 MAX_BATCH_LINKS = 100
+MAX_BATCH_WORKERS = 6
 CLIENT_DISCONNECT_WINERRORS = {10053, 10054}
+SHARED_ANALYSIS_CACHE = TtlCache(max_entries=4096)
 
 
 def json_bytes(payload: Any) -> bytes:
@@ -33,6 +37,73 @@ def is_client_disconnect(error: BaseException) -> bool:
         isinstance(error, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError))
         or getattr(error, "winerror", None) in CLIENT_DISCONNECT_WINERRORS
     )
+
+
+def normalize_unique_links(links: list[Any], limit: int = MAX_BATCH_LINKS) -> list[str]:
+    normalized_links = []
+    seen_links = set()
+
+    for target_url in links[:limit]:
+        normalized = normalize_url(str(target_url))
+
+        if not normalized or normalized in seen_links:
+            continue
+
+        seen_links.add(normalized)
+        normalized_links.append(normalized)
+
+    return normalized_links
+
+
+def group_links_by_domain(links: list[str]) -> list[list[str]]:
+    groups: dict[str, list[str]] = {}
+
+    for target_url in links:
+        domain = extract_registered_domain(target_url) or target_url
+        groups.setdefault(domain, []).append(target_url)
+
+    return list(groups.values())
+
+
+def analyze_link_group(links: list[str]) -> list[dict[str, Any]]:
+    context = new_analysis_context(shared_cache=SHARED_ANALYSIS_CACHE)
+    return [
+        {"url": target_url, "result": analyze_url(target_url, context=context)}
+        for target_url in links
+    ]
+
+
+def analyze_links_batch(
+    links: list[Any],
+    max_workers: int = MAX_BATCH_WORKERS,
+) -> list[dict[str, Any]]:
+    normalized_links = normalize_unique_links(links)
+    groups = group_links_by_domain(normalized_links)
+
+    if len(groups) <= 1 or max_workers <= 1:
+        unordered_results = [
+            item
+            for group in groups
+            for item in analyze_link_group(group)
+        ]
+    else:
+        worker_count = min(max_workers, len(groups))
+        unordered_results = []
+
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            for group_results in executor.map(analyze_link_group, groups):
+                unordered_results.extend(group_results)
+
+    result_by_url = {
+        item["url"]: item
+        for item in unordered_results
+    }
+
+    return [
+        result_by_url[target_url]
+        for target_url in normalized_links
+        if target_url in result_by_url
+    ]
 
 
 class SignalShieldHandler(BaseHTTPRequestHandler):
@@ -116,7 +187,8 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
             page_url = str(payload.get("page_url", ""))
             source = str(payload.get("source", "api"))
 
-            result = analyze_url(target_url)
+            context = new_analysis_context(shared_cache=SHARED_ANALYSIS_CACHE)
+            result = analyze_url(target_url, context=context)
             record_scan_event(target_url, result, page_url=page_url, source=source)
             self.send_json({"ok": True, "result": result})
         except Exception as error:
@@ -134,25 +206,15 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
             if not isinstance(links, list):
                 raise ValueError("links must be a list")
 
-            normalized_links = []
-            seen_links = set()
+            results = analyze_links_batch(links)
 
-            for target_url in links[:MAX_BATCH_LINKS]:
-                normalized = normalize_url(str(target_url))
-
-                if not normalized or normalized in seen_links:
-                    continue
-
-                seen_links.add(normalized)
-                normalized_links.append(normalized)
-
-            context = new_analysis_context()
-            results = []
-
-            for target_url in normalized_links:
-                result = analyze_url(target_url, context=context)
-                record_scan_event(target_url, result, page_url=page_url, source=source)
-                results.append({"url": target_url, "result": result})
+            for item in results:
+                record_scan_event(
+                    item["url"],
+                    item["result"],
+                    page_url=page_url,
+                    source=source,
+                )
 
             self.send_json({
                 "ok": True,

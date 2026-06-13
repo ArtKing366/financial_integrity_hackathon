@@ -30,7 +30,7 @@ def test_characterize_link_flags_shortener_and_suspicious_tld() -> None:
 
 
 def test_analyze_message_combines_text_and_link_risk(monkeypatch) -> None:
-    def fake_analyze_url(url: str) -> dict:
+    def fake_analyze_url(url: str, context=None) -> dict:
         return {
             "verdict": VERDICT_SUSPICIOUS,
             "score": 30,
@@ -45,6 +45,34 @@ def test_analyze_message_combines_text_and_link_risk(monkeypatch) -> None:
     assert result["verdict"] == VERDICT_DANGEROUS
     assert result["links"][0]["score"] == 30
     assert result["message_signals"]["score"] >= 20
+
+
+def test_analyze_message_reuses_one_context_for_all_links(monkeypatch) -> None:
+    contexts = []
+
+    def fake_context() -> dict:
+        return {"marker": object()}
+
+    def fake_analyze_url(url: str, context=None) -> dict:
+        contexts.append(context)
+        return {
+            "verdict": VERDICT_SAFE,
+            "score": 0,
+            "reasons": [],
+            "details": {"input_url": url},
+        }
+
+    monkeypatch.setattr(message_analyzer, "new_analysis_context", fake_context)
+    monkeypatch.setattr(message_analyzer, "analyze_url", fake_analyze_url)
+
+    result = analyze_message(
+        "Check https://first-example.pl/pay and https://second-example.pl/login"
+    )
+
+    assert result["details"]["link_count"] == 2
+    assert len(contexts) == 2
+    assert contexts[0] is contexts[1]
+    assert contexts[0] is not None
 
 
 def test_message_without_links_can_still_be_suspicious() -> None:

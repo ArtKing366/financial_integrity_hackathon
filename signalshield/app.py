@@ -2,6 +2,7 @@ import html as html_lib
 
 import streamlit as st
 
+from core.analysis_cache import TtlCache
 from core.local_db import (
     LIST_BLACKLIST,
     LIST_TRUSTED,
@@ -23,10 +24,22 @@ from core.verdict import (
     VERDICT_SAFE,
     VERDICT_SUSPICIOUS,
     analyze_url,
+    new_analysis_context,
 )
 
 
 VERDICT_TRUSTED_BY_USER = "TRUSTED_BY_USER"
+
+
+def get_analysis_cache() -> TtlCache:
+    if "analysis_cache" not in st.session_state:
+        st.session_state["analysis_cache"] = TtlCache(max_entries=4096)
+
+    return st.session_state["analysis_cache"]
+
+
+def make_analysis_context() -> dict:
+    return new_analysis_context(shared_cache=get_analysis_cache())
 
 
 def format_value(value) -> str:
@@ -802,7 +815,7 @@ if mode == "Single link":
 
     if should_analyze_link and url:
         with st.spinner("Analyzing link..."):
-            result = analyze_url(url)
+            result = analyze_url(url, context=make_analysis_context())
             record_scan_event(url, result, source="streamlit")
 
         render_verdict_banner(result)
@@ -825,7 +838,7 @@ elif mode == "Full message":
 
     if st.button("Analyze message") and message:
         with st.spinner("Analyzing message and all detected links..."):
-            result = analyze_message(message)
+            result = analyze_message(message, context=make_analysis_context())
             for link in result.get("links", []):
                 record_scan_event(
                     link.get("url", ""),
