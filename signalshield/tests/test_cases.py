@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.verdict import VERDICT_DANGEROUS, VERDICT_SAFE, analyze_url
+from core.verdict import VERDICT_DANGEROUS, VERDICT_SAFE, VERDICT_SUSPICIOUS, analyze_url
 
 TEST_CASES = [
     ("https://allegro.pl", VERDICT_SAFE),
