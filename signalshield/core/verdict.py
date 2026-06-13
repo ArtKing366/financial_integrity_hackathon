@@ -40,6 +40,11 @@ try:
 except Exception:
     analyze_page_rules = None
 
+try:
+    from core.url_heuristics import analyze_url_heuristics
+except Exception:
+    analyze_url_heuristics = None
+
 
 def load_trusted_brands() -> list[str]:
     project_root = Path(__file__).resolve().parents[1]
@@ -129,6 +134,7 @@ def _details(url: str, hostname: str, domain: str) -> dict:
         "page_existence": None,
         "domain_age_days": None,
         "similarity_results": [],
+        "url_heuristics": None,
     }
 
 
@@ -229,6 +235,26 @@ def analyze_url(url: str) -> dict:
             reasons.append("Domain is relatively new - less than 90 days old.")
     else:
         details["whois_status"] = "WHOIS module is not available."
+
+    if analyze_url_heuristics is not None:
+        try:
+            heuristic_result = analyze_url_heuristics(url, load_trusted_brands())
+        except Exception as error:
+            heuristic_result = {
+                "score": 0,
+                "matched_rules": [],
+                "error": str(error),
+            }
+
+        details["url_heuristics"] = heuristic_result
+        risk_score += int(heuristic_result.get("score", 0) or 0)
+
+        for rule in heuristic_result.get("matched_rules", []):
+            description = rule.get("description", "")
+            if description:
+                reasons.append(description)
+    else:
+        details["url_heuristics"] = "URL heuristic module is not available."
 
     similarity_results = run_similarity_check(domain)
     details["similarity_results"] = similarity_results

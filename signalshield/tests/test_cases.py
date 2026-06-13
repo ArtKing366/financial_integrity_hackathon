@@ -10,6 +10,8 @@ TEST_CASES = [
     ("https://mbank.pl", VERDICT_SAFE),
     ("https://mbank-logowanie.com", VERDICT_DANGEROUS),
     ("https://inpost.pl", VERDICT_SAFE),
+    ("https://vasiapupkin.xyz/allegro.pl/pay/blik-secure", VERDICT_SUSPICIOUS),
+    ("https://random-long-domain-name-test.pl/login", VERDICT_DANGEROUS),
 ]
 
 
