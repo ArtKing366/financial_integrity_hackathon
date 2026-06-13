@@ -5,3 +5,4 @@ requests
 tldextract
 validators
 pytest
+beautifulsoup4
