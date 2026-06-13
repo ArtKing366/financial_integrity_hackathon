@@ -4,3 +4,4 @@ python-Levenshtein
 requests
 tldextract
 validators
+pytest
