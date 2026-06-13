@@ -1,20 +1,23 @@
 const DEFAULT_CONFIG = {
   analyzerBaseUrl: "http://localhost:8501/",
   openAnalyzerOnClick: true,
-  highlightSafeLinks: true
+  highlightSafeLinks: true,
+  highlightNotFoundLinks: true
 };
 
 const elements = {
   analyzerBaseUrl: document.getElementById("analyzerBaseUrl"),
   openAnalyzerOnClick: document.getElementById("openAnalyzerOnClick"),
   highlightSafeLinks: document.getElementById("highlightSafeLinks"),
+  highlightNotFoundLinks: document.getElementById("highlightNotFoundLinks"),
   save: document.getElementById("save"),
   rescan: document.getElementById("rescan"),
   status: document.getElementById("status"),
   scanned: document.getElementById("scanned"),
   dangerous: document.getElementById("dangerous"),
   suspicious: document.getElementById("suspicious"),
-  safe: document.getElementById("safe")
+  safe: document.getElementById("safe"),
+  notFound: document.getElementById("notFound")
 };
 
 function setStatus(message) {
@@ -39,6 +42,7 @@ function updateStats(stats) {
   elements.dangerous.textContent = safeStats.dangerous || 0;
   elements.suspicious.textContent = safeStats.suspicious || 0;
   elements.safe.textContent = safeStats.safe || 0;
+  elements.notFound.textContent = safeStats.not_found || 0;
 }
 
 function requestStats() {
@@ -63,6 +67,7 @@ function loadConfig() {
     elements.analyzerBaseUrl.value = config.analyzerBaseUrl;
     elements.openAnalyzerOnClick.checked = Boolean(config.openAnalyzerOnClick);
     elements.highlightSafeLinks.checked = Boolean(config.highlightSafeLinks);
+    elements.highlightNotFoundLinks.checked = Boolean(config.highlightNotFoundLinks);
     requestStats();
   });
 }
@@ -80,7 +85,8 @@ function saveConfig(callback) {
   const config = {
     analyzerBaseUrl,
     openAnalyzerOnClick: elements.openAnalyzerOnClick.checked,
-    highlightSafeLinks: elements.highlightSafeLinks.checked
+    highlightSafeLinks: elements.highlightSafeLinks.checked,
+    highlightNotFoundLinks: elements.highlightNotFoundLinks.checked
   };
 
   chrome.storage.sync.set(config, () => {
@@ -88,6 +94,19 @@ function saveConfig(callback) {
     if (callback) {
       callback();
     }
+  });
+}
+
+function reloadActivePage() {
+  activeTab((tab) => {
+    if (!tab || !tab.id) {
+      setStatus("Saved. No active tab to reload.");
+      return;
+    }
+
+    chrome.tabs.reload(tab.id, () => {
+      setStatus("Saved. Page reloading.");
+    });
   });
 }
 
@@ -110,6 +129,6 @@ function rescanPage() {
   });
 }
 
-elements.save.addEventListener("click", () => saveConfig());
+elements.save.addEventListener("click", () => saveConfig(reloadActivePage));
 elements.rescan.addEventListener("click", () => saveConfig(rescanPage));
 document.addEventListener("DOMContentLoaded", loadConfig);

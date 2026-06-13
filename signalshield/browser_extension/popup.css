@@ -1,5 +1,5 @@
 body {
-  width: 330px;
+  width: 350px;
   margin: 0;
   background: #f8fafc;
   color: #111827;
@@ -45,7 +45,7 @@ input[type="url"] {
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 6px;
   margin: 12px 0;
 }
@@ -78,6 +78,10 @@ input[type="url"] {
 
 .safe strong {
   color: #16a34a;
+}
+
+.muted strong {
+  color: #4b5563;
 }
 
 .actions {

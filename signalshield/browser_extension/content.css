@@ -25,6 +25,11 @@ a[data-ss-verdict="unknown"] {
   box-shadow: 0 0 0 2px rgba(107, 114, 128, 0.55) !important;
 }
 
+a[data-ss-verdict="not_found"] {
+  background-color: rgba(75, 85, 99, 0.15) !important;
+  box-shadow: 0 0 0 2px rgba(75, 85, 99, 0.72) !important;
+}
+
 #ss-link-tooltip {
   position: fixed;
   z-index: 2147483647;

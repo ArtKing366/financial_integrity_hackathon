@@ -112,7 +112,6 @@ def fetch_page(url: str) -> tuple[str | None, str | None]:
 
         html = response.text
 
-        # Avoid processing unexpectedly large pages.
         if len(html) > 2_000_000:
             html = html[:2_000_000]
 
@@ -192,8 +191,6 @@ def form_action_is_suspicious(soup: BeautifulSoup, page_url: str) -> bool:
 
         action = form.get("action", "").strip()
 
-        # An empty action submits the form to the current domain.
-        # That is suspicious unless the current domain is an official Microsoft login host.
         if not action:
             return True
 
@@ -263,7 +260,6 @@ def analyze_page_rules(url: str) -> dict:
         result["fetch_error"] = "Invalid URL"
         return result
 
-    # Official Microsoft login hosts should not be treated as phishing.
     if is_trusted_microsoft_login(hostname):
         result["matched_rules"].append({
             "id": "trusted_microsoft_login",
@@ -285,7 +281,6 @@ def analyze_page_rules(url: str) -> dict:
             "score": 25,
         })
 
-    # Data URIs are a separate high-risk case.
     if url.lower().startswith("data:text/html"):
         result["score"] += 60
         result["hard_block"] = True
@@ -324,7 +319,6 @@ def analyze_page_rules(url: str) -> dict:
         suspicious_domain_matches or microsoft_branding or aad_matches
     )
 
-    # 1. AAD fingerprint on a non-Microsoft domain
     if len(aad_matches) >= 2:
         result["score"] += 35
         result["matched_rules"].append({
@@ -335,7 +329,6 @@ def analyze_page_rules(url: str) -> dict:
             "score": 35,
         })
 
-    # 2. Microsoft branding plus login/password fields
     if microsoft_branding and password_field and login_field:
         result["score"] += 30
         result["matched_rules"].append({
@@ -345,7 +338,6 @@ def analyze_page_rules(url: str) -> dict:
             "score": 30,
         })
 
-    # 3. Password form submits to a non-Microsoft target
     if microsoft_context and form_action_is_suspicious(soup, url):
         result["score"] += 45
         result["hard_block"] = True
@@ -356,7 +348,6 @@ def analyze_page_rules(url: str) -> dict:
             "score": 45,
         })
 
-    # 4. JavaScript changes the form action
     if microsoft_context and detect_js_form_action_modification(html):
         result["score"] += 35
         result["matched_rules"].append({
@@ -366,7 +357,6 @@ def analyze_page_rules(url: str) -> dict:
             "score": 35,
         })
 
-    # 5. Long query parameters plus Microsoft branding and a form
     if has_long_query_parameter(url) and microsoft_branding and (password_field or login_field):
         result["score"] += 20
         result["matched_rules"].append({
@@ -376,7 +366,6 @@ def analyze_page_rules(url: str) -> dict:
             "score": 20,
         })
 
-    # 6. Social engineering language
     if microsoft_branding and suspicious_text_matches:
         result["score"] += 15
         result["matched_rules"].append({

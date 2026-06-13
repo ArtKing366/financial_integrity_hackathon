@@ -70,7 +70,7 @@ http://localhost:8501/?mode=link&url=https%3A%2F%2Fexample.pl&auto=1
 
 ## Browser Extension
 
-The `browser_extension/` folder contains a Manifest V3 Chrome/Edge extension. It scans the current page in real time, highlights links by risk color, shows hover explanations, and opens the Streamlit analyzer with the selected URL pre-filled.
+The `browser_extension/` folder contains a Manifest V3 Chrome/Edge extension. It scans the current page in real time, highlights links by risk color, shows hover explanations, and opens the Streamlit analyzer with the selected URL pre-filled. The popup also lets users toggle safe-link and NOT_FOUND highlighting; saving settings reloads the active page.
 
 Install it through `chrome://extensions` -> Developer mode -> Load unpacked -> `signalshield/browser_extension`.
 
