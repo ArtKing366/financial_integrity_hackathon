@@ -13,6 +13,7 @@ signalshield/
 |   |-- page_existence.py
 |   |-- dns_infrastructure.py
 |   |-- whois_check.py     # Domain age via WHOIS
+|   |-- html_crawler.py    # Lightweight HTML scan
 |   |-- url_heuristics.py  # Path keywords and domain ugliness rules
 |   |-- similarity.py      # Typosquatting and brand mimicry
 |   |-- page_rules.py      # Optional page content rules
@@ -37,9 +38,10 @@ Independent check modules feed a single `analyze_url()` API. The same API can po
 3. **page_existence** - separates missing domains/pages from reachable pages without overriding stronger phishing signals.
 4. **dns_infrastructure** - checks whether untrusted domains resolve and have MX records configured.
 5. **whois_check** - uses domain registration age when WHOIS data is available.
-6. **url_heuristics** - checks suspicious path keywords on untrusted domains and unusually long or hyphen-heavy domains.
-7. **similarity** - detects typosquatting, brand substrings, and homograph attacks against trusted brands.
-8. **page_rules** - optional content rules for Microsoft-like login pages and credential forms.
+6. **html_crawler** - quickly fetches HTML and looks for password fields or Polish login/payment markers on untrusted domains.
+7. **url_heuristics** - checks suspicious path keywords on untrusted domains and unusually long or hyphen-heavy domains.
+8. **similarity** - detects typosquatting, brand substrings, and homograph attacks against trusted brands.
+9. **page_rules** - optional content rules for Microsoft-like login pages and credential forms.
 
 Verdict thresholds: score >= 50 -> DANGEROUS, score >= 20 -> SUSPICIOUS, else SAFE.
 

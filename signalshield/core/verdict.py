@@ -46,6 +46,11 @@ except Exception:
     analyze_page_rules = None
 
 try:
+    from core.html_crawler import analyze_html_crawling
+except Exception:
+    analyze_html_crawling = None
+
+try:
     from core.url_heuristics import analyze_url_heuristics
 except Exception:
     analyze_url_heuristics = None
@@ -144,6 +149,7 @@ def _details(url: str, hostname: str, domain: str) -> dict:
         "page_existence": None,
         "dns_infrastructure": None,
         "domain_age_days": None,
+        "html_crawling": None,
         "similarity_results": [],
         "url_heuristics": None,
         "domain_entropy": None,
@@ -285,6 +291,26 @@ def analyze_url(url: str) -> dict:
             reasons.append(entropy_result["description"])
     else:
         details["domain_entropy"] = "Domain entropy module is not available."
+
+    if analyze_html_crawling is not None:
+        try:
+            html_result = analyze_html_crawling(url, load_trusted_brands())
+        except Exception as error:
+            html_result = {
+                "score": 0,
+                "matched_rules": [],
+                "fetch_error": str(error),
+            }
+
+        details["html_crawling"] = html_result
+        risk_score += int(html_result.get("score", 0) or 0)
+
+        for rule in html_result.get("matched_rules", []):
+            description = rule.get("description", "")
+            if description:
+                reasons.append(description)
+    else:
+        details["html_crawling"] = "HTML crawler module is not available."
 
     if analyze_url_heuristics is not None:
         try:
