@@ -1,5 +1,7 @@
 const DEFAULT_CONFIG = {
   analyzerBaseUrl: "http://localhost:8501/",
+  apiBaseUrl: "http://127.0.0.1:8766/",
+  useDeepAnalysis: true,
   openAnalyzerOnClick: true,
   highlightSafeLinks: true,
   highlightNotFoundLinks: true
@@ -7,6 +9,8 @@ const DEFAULT_CONFIG = {
 
 const elements = {
   analyzerBaseUrl: document.getElementById("analyzerBaseUrl"),
+  apiBaseUrl: document.getElementById("apiBaseUrl"),
+  useDeepAnalysis: document.getElementById("useDeepAnalysis"),
   openAnalyzerOnClick: document.getElementById("openAnalyzerOnClick"),
   highlightSafeLinks: document.getElementById("highlightSafeLinks"),
   highlightNotFoundLinks: document.getElementById("highlightNotFoundLinks"),
@@ -17,15 +21,21 @@ const elements = {
   dangerous: document.getElementById("dangerous"),
   suspicious: document.getElementById("suspicious"),
   safe: document.getElementById("safe"),
-  notFound: document.getElementById("notFound")
+  notFound: document.getElementById("notFound"),
+  trusted: document.getElementById("trusted"),
+  analysisState: document.getElementById("analysisState"),
+  analysisLabel: document.getElementById("analysisLabel"),
+  analysisDetail: document.getElementById("analysisDetail")
 };
+
+let statsTimer = null;
 
 function setStatus(message) {
   elements.status.textContent = message;
 }
 
-function normalizeBaseUrl(value) {
-  const trimmed = value.trim() || DEFAULT_CONFIG.analyzerBaseUrl;
+function normalizeBaseUrl(value, fallback) {
+  const trimmed = value.trim() || fallback;
   const url = new URL(trimmed);
   return url.href;
 }
@@ -43,6 +53,21 @@ function updateStats(stats) {
   elements.suspicious.textContent = safeStats.suspicious || 0;
   elements.safe.textContent = safeStats.safe || 0;
   elements.notFound.textContent = safeStats.not_found || 0;
+  elements.trusted.textContent = safeStats.trusted_by_user || 0;
+}
+
+function updateAnalysisState(analysis) {
+  const safeAnalysis = analysis || {};
+  const status = safeAnalysis.status || "quick_js";
+  const label = safeAnalysis.label || "Quick JS check";
+  const detail = safeAnalysis.detail || "The current page has only browser-side scan data.";
+  const checked = safeAnalysis.deepChecked || 0;
+  const total = safeAnalysis.deepTotal || 0;
+  const suffix = total ? ` (${checked}/${total})` : "";
+
+  elements.analysisState.dataset.status = status;
+  elements.analysisLabel.textContent = `${label}${suffix}`;
+  elements.analysisDetail.textContent = detail;
 }
 
 function requestStats() {
@@ -58,6 +83,7 @@ function requestStats() {
       }
 
       updateStats(response.stats);
+      updateAnalysisState(response.analysis);
     });
   });
 }
@@ -65,6 +91,8 @@ function requestStats() {
 function loadConfig() {
   chrome.storage.sync.get(DEFAULT_CONFIG, (config) => {
     elements.analyzerBaseUrl.value = config.analyzerBaseUrl;
+    elements.apiBaseUrl.value = config.apiBaseUrl;
+    elements.useDeepAnalysis.checked = Boolean(config.useDeepAnalysis);
     elements.openAnalyzerOnClick.checked = Boolean(config.openAnalyzerOnClick);
     elements.highlightSafeLinks.checked = Boolean(config.highlightSafeLinks);
     elements.highlightNotFoundLinks.checked = Boolean(config.highlightNotFoundLinks);
@@ -74,16 +102,26 @@ function loadConfig() {
 
 function saveConfig(callback) {
   let analyzerBaseUrl;
+  let apiBaseUrl;
 
   try {
-    analyzerBaseUrl = normalizeBaseUrl(elements.analyzerBaseUrl.value);
+    analyzerBaseUrl = normalizeBaseUrl(
+      elements.analyzerBaseUrl.value,
+      DEFAULT_CONFIG.analyzerBaseUrl
+    );
+    apiBaseUrl = normalizeBaseUrl(
+      elements.apiBaseUrl.value,
+      DEFAULT_CONFIG.apiBaseUrl
+    );
   } catch (_error) {
-    setStatus("Analyzer URL is invalid.");
+    setStatus("Analyzer or API URL is invalid.");
     return;
   }
 
   const config = {
     analyzerBaseUrl,
+    apiBaseUrl,
+    useDeepAnalysis: elements.useDeepAnalysis.checked,
     openAnalyzerOnClick: elements.openAnalyzerOnClick.checked,
     highlightSafeLinks: elements.highlightSafeLinks.checked,
     highlightNotFoundLinks: elements.highlightNotFoundLinks.checked
@@ -124,6 +162,7 @@ function rescanPage() {
       }
 
       updateStats(response.stats);
+      updateAnalysisState(response.analysis);
       setStatus("Page rescanned.");
     });
   });
@@ -131,4 +170,10 @@ function rescanPage() {
 
 elements.save.addEventListener("click", () => saveConfig(reloadActivePage));
 elements.rescan.addEventListener("click", () => saveConfig(rescanPage));
-document.addEventListener("DOMContentLoaded", loadConfig);
+document.addEventListener("DOMContentLoaded", () => {
+  loadConfig();
+  statsTimer = window.setInterval(requestStats, 1200);
+});
+window.addEventListener("unload", () => {
+  window.clearInterval(statsTimer);
+});

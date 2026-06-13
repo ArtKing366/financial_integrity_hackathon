@@ -1,6 +1,7 @@
 import json
 import re
 import unicodedata
+from functools import lru_cache
 from pathlib import Path
 
 from core.domain_utils import extract_hostname, split_domain
@@ -43,6 +44,7 @@ def tokenize(value: str) -> list[str]:
     return [token for token in re.split(r"[^a-z0-9]+", value) if token]
 
 
+@lru_cache(maxsize=1)
 def load_brand_keywords() -> list[str]:
     project_root = Path(__file__).resolve().parents[1]
     brands_path = project_root / "data" / "trusted_brands.json"

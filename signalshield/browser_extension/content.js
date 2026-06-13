@@ -3,6 +3,8 @@
 
   const DEFAULT_CONFIG = {
     analyzerBaseUrl: "http://localhost:8501/",
+    apiBaseUrl: "http://127.0.0.1:8766/",
+    useDeepAnalysis: true,
     openAnalyzerOnClick: true,
     highlightSafeLinks: true,
     highlightNotFoundLinks: true
@@ -121,9 +123,20 @@
       suspicious: 0,
       safe: 0,
       not_found: 0,
+      trusted_by_user: 0,
       unknown: 0
     },
-    scanTimer: null
+    analysis: {
+      status: "quick_js",
+      label: "Quick JS check",
+      detail: "The page has been checked only by the browser extension.",
+      deepChecked: 0,
+      deepTotal: 0,
+      updatedAt: ""
+    },
+    scanTimer: null,
+    deepTimer: null,
+    lastDeepSignature: ""
   };
 
   function normalizeText(value) {
@@ -345,6 +358,43 @@
     };
   }
 
+  function normalizeVerdict(verdict) {
+    return String(verdict || "unknown").toLowerCase();
+  }
+
+  function setAnalysisStatus(status, label, detail, deepChecked = 0, deepTotal = 0) {
+    state.analysis = {
+      status,
+      label,
+      detail,
+      deepChecked,
+      deepTotal,
+      updatedAt: new Date().toLocaleTimeString()
+    };
+  }
+
+  function linkAnalysisLabel(anchor) {
+    if (anchor.dataset.ssAnalysisStage === "python") {
+      return "Python deep analysis completed.";
+    }
+
+    if (state.config.useDeepAnalysis) {
+      if (state.analysis.status === "pending") {
+        return "Quick browser check. Python deep analysis is still running.";
+      }
+
+      if (state.analysis.status === "api_unavailable") {
+        return "Quick browser check only. Local API is unavailable.";
+      }
+
+      if (state.analysis.status === "complete") {
+        return "Quick browser check. Python did not return a final result for this link.";
+      }
+    }
+
+    return "Quick browser check only.";
+  }
+
   function analyzerUrl(targetUrl) {
     const base = state.config.analyzerBaseUrl || DEFAULT_CONFIG.analyzerBaseUrl;
     const url = new URL(base);
@@ -352,6 +402,68 @@
     url.searchParams.set("url", targetUrl);
     url.searchParams.set("auto", "1");
     return url.href;
+  }
+
+  function apiUrl(path, baseUrl) {
+    const base = baseUrl || state.config.apiBaseUrl || DEFAULT_CONFIG.apiBaseUrl;
+    return new URL(path, base).href;
+  }
+
+  function apiBaseCandidates() {
+    const configured = state.config.apiBaseUrl || DEFAULT_CONFIG.apiBaseUrl;
+    const candidates = [configured];
+
+    try {
+      const url = new URL(configured);
+
+      if (url.hostname === "localhost") {
+        url.hostname = "127.0.0.1";
+        candidates.push(url.href);
+      } else if (url.hostname === "127.0.0.1") {
+        url.hostname = "localhost";
+        candidates.push(url.href);
+      }
+    } catch (_error) {
+      candidates.push(DEFAULT_CONFIG.apiBaseUrl);
+    }
+
+    return Array.from(new Set(candidates));
+  }
+
+  async function postAnalyzeBatch(links) {
+    let lastError = "Local API request failed.";
+
+    for (const baseUrl of apiBaseCandidates()) {
+      try {
+        const response = await fetch(apiUrl("/analyze-batch", baseUrl), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            page_url: window.location.href,
+            links,
+            source: "extension"
+          })
+        });
+
+        if (!response.ok) {
+          lastError = `${baseUrl} returned HTTP ${response.status}.`;
+          continue;
+        }
+
+        const payload = await response.json();
+
+        if (!payload.ok || !Array.isArray(payload.results)) {
+          lastError = `${baseUrl} returned an invalid response.`;
+          continue;
+        }
+
+        return { baseUrl, payload };
+      } catch (_error) {
+        lastError = `${baseUrl} is not reachable from the browser extension.`;
+      }
+    }
+
+    throw new Error(lastError);
   }
 
   function shouldIgnoreLink(anchor) {
@@ -368,13 +480,58 @@
       "ssReasons",
       "ssUrl",
       "ssDomain",
-      "ssVerdict"
+      "ssVerdict",
+      "ssAnalysisStage"
     ]) {
       delete anchor.dataset[key];
     }
 
     if ((anchor.getAttribute("aria-label") || "").startsWith("SignalShield:")) {
       anchor.removeAttribute("aria-label");
+    }
+  }
+
+  function shouldDisplayVerdict(verdict) {
+    if (verdict === "safe" && !state.config.highlightSafeLinks) {
+      return false;
+    }
+
+    if (verdict === "not_found" && !state.config.highlightNotFoundLinks) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function applyAnalysisResult(anchor, result, stage = "quick_js") {
+    const verdict = normalizeVerdict(result.verdict);
+    const reasons = Array.isArray(result.reasons) ? result.reasons : [];
+    const details = result.details || {};
+
+    anchor.dataset.ssAnalysisStage = stage;
+    anchor.dataset.ssRawVerdict = verdict;
+    anchor.dataset.ssScore = String(result.score || 0);
+    anchor.dataset.ssReasons = JSON.stringify(reasons);
+    anchor.dataset.ssUrl = result.url || details.input_url || anchor.href;
+    anchor.dataset.ssDomain = result.registeredDomain || details.domain || "";
+
+    if (!shouldDisplayVerdict(verdict)) {
+      delete anchor.dataset.ssVerdict;
+      return;
+    }
+
+    anchor.dataset.ssVerdict = verdict;
+    anchor.setAttribute(
+      "aria-label",
+      `SignalShield: ${verdict}, risk ${result.score || 0} percent. ${reasons.join(" ")}`
+    );
+
+    if (anchor.dataset.ssListeners !== "1") {
+      anchor.addEventListener("mouseenter", showTooltip);
+      anchor.addEventListener("mousemove", moveTooltip);
+      anchor.addEventListener("mouseleave", hideTooltip);
+      anchor.addEventListener("click", handleClick, true);
+      anchor.dataset.ssListeners = "1";
     }
   }
 
@@ -394,35 +551,7 @@
 
     const result = classifyHref(anchor.href);
     anchor.dataset.ssAnalyzed = "1";
-    anchor.dataset.ssRawVerdict = result.verdict;
-    anchor.dataset.ssScore = String(result.score);
-    anchor.dataset.ssReasons = JSON.stringify(result.reasons);
-    anchor.dataset.ssUrl = result.url;
-    anchor.dataset.ssDomain = result.registeredDomain || "";
-
-    if (result.verdict === "safe" && !state.config.highlightSafeLinks) {
-      delete anchor.dataset.ssVerdict;
-      return;
-    }
-
-    if (result.verdict === "not_found" && !state.config.highlightNotFoundLinks) {
-      delete anchor.dataset.ssVerdict;
-      return;
-    }
-
-    anchor.dataset.ssVerdict = result.verdict;
-    anchor.setAttribute(
-      "aria-label",
-      `SignalShield: ${result.verdict}, risk ${result.score} percent. ${result.reasons.join(" ")}`
-    );
-
-    if (anchor.dataset.ssListeners !== "1") {
-      anchor.addEventListener("mouseenter", showTooltip);
-      anchor.addEventListener("mousemove", moveTooltip);
-      anchor.addEventListener("mouseleave", hideTooltip);
-      anchor.addEventListener("click", handleClick, true);
-      anchor.dataset.ssListeners = "1";
-    }
+    applyAnalysisResult(anchor, result, "quick_js");
   }
 
   function resetStats() {
@@ -432,12 +561,20 @@
       suspicious: 0,
       safe: 0,
       not_found: 0,
+      trusted_by_user: 0,
       unknown: 0
     };
   }
 
   function scanPage() {
     resetStats();
+    setAnalysisStatus(
+      state.config.useDeepAnalysis ? "quick_js" : "disabled",
+      state.config.useDeepAnalysis ? "Quick JS check" : "Python deep analysis off",
+      state.config.useDeepAnalysis
+        ? "The extension has finished the instant browser-side scan."
+        : "Only the browser-side scan is enabled in the popup."
+    );
 
     for (const anchor of document.querySelectorAll("a[href]")) {
       if (shouldIgnoreLink(anchor)) {
@@ -456,6 +593,114 @@
       if (Object.prototype.hasOwnProperty.call(state.stats, verdict)) {
         state.stats[verdict] = (state.stats[verdict] || 0) + 1;
       }
+    }
+
+    scheduleDeepAnalysis();
+  }
+
+  function recomputeStatsFromAnchors() {
+    resetStats();
+
+    for (const anchor of document.querySelectorAll("a[href]")) {
+      if (shouldIgnoreLink(anchor) || anchor.dataset.ssAnalyzed !== "1") {
+        continue;
+      }
+
+      state.stats.scanned += 1;
+      const verdict = anchor.dataset.ssRawVerdict || anchor.dataset.ssVerdict || "safe";
+
+      if (Object.prototype.hasOwnProperty.call(state.stats, verdict)) {
+        state.stats[verdict] = (state.stats[verdict] || 0) + 1;
+      }
+    }
+  }
+
+  function anchorsByUrl() {
+    const mapping = new Map();
+
+    for (const anchor of document.querySelectorAll("a[href]")) {
+      if (shouldIgnoreLink(anchor) || !anchor.dataset.ssUrl) {
+        continue;
+      }
+
+      const links = mapping.get(anchor.dataset.ssUrl) || [];
+      links.push(anchor);
+      mapping.set(anchor.dataset.ssUrl, links);
+    }
+
+    return mapping;
+  }
+
+  function scheduleDeepAnalysis() {
+    if (!state.config.useDeepAnalysis) {
+      setAnalysisStatus(
+        "disabled",
+        "Python deep analysis off",
+        "Only the browser-side scan is enabled in the popup."
+      );
+      return;
+    }
+
+    window.clearTimeout(state.deepTimer);
+    state.deepTimer = window.setTimeout(runDeepAnalysis, 400);
+  }
+
+  async function runDeepAnalysis() {
+    const mapping = anchorsByUrl();
+    const links = Array.from(mapping.keys()).filter((url) => /^https?:\/\//i.test(url));
+    const signature = `${window.location.href}|${links.join("|")}`;
+
+    if (!links.length) {
+      setAnalysisStatus(
+        "quick_js",
+        "Quick JS check",
+        "No HTTP or HTTPS links were available for Python deep analysis."
+      );
+      return;
+    }
+
+    if (signature === state.lastDeepSignature) {
+      return;
+    }
+
+    setAnalysisStatus(
+      "pending",
+      "Python analysis running",
+      "The extension is sending page links to the local SignalShield API.",
+      0,
+      links.length
+    );
+
+    try {
+      const { baseUrl, payload } = await postAnalyzeBatch(links);
+
+      state.lastDeepSignature = signature;
+
+      for (const item of payload.results) {
+        const anchors = mapping.get(item.url) || [];
+
+        for (const anchor of anchors) {
+          applyAnalysisResult(anchor, item.result || {}, "python");
+        }
+      }
+
+      recomputeStatsFromAnchors();
+      setAnalysisStatus(
+        "complete",
+        "Python analysis complete",
+        `Colors and reasons were updated with the local Python analyzer at ${baseUrl}.`,
+        payload.results.length,
+        links.length
+      );
+    } catch (error) {
+      setAnalysisStatus(
+        "api_unavailable",
+        "Local API unavailable",
+        `${error.message} Only the quick browser-side scan is available.`,
+        0,
+        links.length
+      );
+      return;
     }
   }
 
@@ -488,11 +733,13 @@
     const verdict = anchor.dataset.ssVerdict || "unknown";
     const score = anchor.dataset.ssScore || "0";
     const domain = anchor.dataset.ssDomain || "";
+    const analysisLabel = linkAnalysisLabel(anchor);
     const tooltip = tooltipElement();
 
     tooltip.innerHTML = [
       `<strong>SignalShield: ${escapeHtml(verdict.toUpperCase())} (${escapeHtml(score)}%)</strong>`,
       domain ? `<div>${escapeHtml(domain)}</div>` : "",
+      `<div>${escapeHtml(analysisLabel)}</div>`,
       "<ul>",
       ...reasons.slice(0, 6).map((reason) => `<li>${escapeHtml(reason)}</li>`),
       "</ul>",
@@ -558,15 +805,16 @@
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message && message.type === "SS_RESCAN") {
+      state.lastDeepSignature = "";
       loadConfig(() => {
         scanPage();
-        sendResponse({ ok: true, stats: state.stats });
+        sendResponse({ ok: true, stats: state.stats, analysis: state.analysis });
       });
       return true;
     }
 
     if (message && message.type === "SS_GET_STATS") {
-      sendResponse({ ok: true, stats: state.stats });
+      sendResponse({ ok: true, stats: state.stats, analysis: state.analysis });
       return false;
     }
 

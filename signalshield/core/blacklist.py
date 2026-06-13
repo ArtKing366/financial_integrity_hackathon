@@ -12,6 +12,8 @@ except Exception:
 BLACKLIST_URL = "https://hole.cert.pl/domains/domains.txt"
 CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "cert_blacklist.csv"
 CACHE_MAX_AGE_HOURS = 6
+_BLACKLIST_MEMORY_CACHE: set[str] | None = None
+_BLACKLIST_MEMORY_CACHE_TIME: datetime | None = None
 
 FALLBACK_DOMAINS = {
     "allegro-platnosc24.pl",
@@ -75,10 +77,24 @@ def download_blacklist() -> set[str]:
 
 
 def _get_blacklist_domains() -> set[str]:
+    global _BLACKLIST_MEMORY_CACHE, _BLACKLIST_MEMORY_CACHE_TIME
+
+    if (
+        _BLACKLIST_MEMORY_CACHE is not None
+        and _BLACKLIST_MEMORY_CACHE_TIME is not None
+        and datetime.now() - _BLACKLIST_MEMORY_CACHE_TIME < timedelta(hours=CACHE_MAX_AGE_HOURS)
+    ):
+        return _BLACKLIST_MEMORY_CACHE
+
     if not _cache_is_fresh():
-        return download_blacklist()
-    cached = _load_cached_domains()
-    return cached | set(FALLBACK_DOMAINS)
+        domains = download_blacklist()
+    else:
+        cached = _load_cached_domains()
+        domains = cached | set(FALLBACK_DOMAINS)
+
+    _BLACKLIST_MEMORY_CACHE = domains
+    _BLACKLIST_MEMORY_CACHE_TIME = datetime.now()
+    return domains
 
 
 def check_blacklist(url_or_domain: str) -> bool:

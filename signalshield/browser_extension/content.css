@@ -30,6 +30,11 @@ a[data-ss-verdict="not_found"] {
   box-shadow: 0 0 0 2px rgba(75, 85, 99, 0.72) !important;
 }
 
+a[data-ss-verdict="trusted_by_user"] {
+  background-color: rgba(37, 99, 235, 0.15) !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.75) !important;
+}
+
 #ss-link-tooltip {
   position: fixed;
   z-index: 2147483647;

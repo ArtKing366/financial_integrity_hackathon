@@ -62,6 +62,18 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+For browser-extension deep analysis and SQLite analytics, run the local API in a second terminal:
+
+```powershell
+.\scripts\run_api.ps1
+```
+
+If you are using Command Prompt (`C:\...>` instead of `PS C:\...>`), run:
+
+```bat
+scripts\run_api.cmd
+```
+
 The Streamlit analyzer also supports direct links from the browser extension:
 
 ```text
@@ -70,7 +82,7 @@ http://localhost:8501/?mode=link&url=https%3A%2F%2Fexample.pl&auto=1
 
 ## Browser Extension
 
-The `browser_extension/` folder contains a Manifest V3 Chrome/Edge extension. It scans the current page in real time, highlights links by risk color, shows hover explanations, and opens the Streamlit analyzer with the selected URL pre-filled. The popup also lets users toggle safe-link and NOT_FOUND highlighting; saving settings reloads the active page.
+The `browser_extension/` folder contains a Manifest V3 Chrome/Edge extension. It scans the current page in real time, highlights links by risk color, shows hover explanations, and opens the Streamlit analyzer with the selected URL pre-filled. When the local API is running, the extension also upgrades quick JS results with Python analysis and records per-page analytics in SQLite. The popup lets users toggle safe-link and NOT_FOUND highlighting; saving settings reloads the active page.
 
 Install it through `chrome://extensions` -> Developer mode -> Load unpacked -> `signalshield/browser_extension`.
 
@@ -79,6 +91,8 @@ Install it through `chrome://extensions` -> Developer mode -> Load unpacked -> `
 ```bash
 pytest
 ```
+
+For full local setup, extension fixture checks, and smoke-test steps, see [docs/testing.md](docs/testing.md).
 
 ## Demo URLs
 
