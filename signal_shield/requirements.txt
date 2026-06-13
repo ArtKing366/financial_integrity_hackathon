@@ -1,0 +1,6 @@
+streamlit
+python-whois
+python-Levenshtein
+requests
+tldextract
+validators
