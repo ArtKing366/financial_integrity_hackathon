@@ -1,13 +1,13 @@
-"""Этап 2: WHOIS-анализ возраста домена."""
-
+import socket
 from datetime import datetime
 from typing import Optional
 
 import whois
 
+socket.setdefaulttimeout(5)
+
 
 def get_domain_age(domain: str) -> Optional[int]:
-    """Возвращает возраст домена в днях или None, если дата недоступна."""
     try:
         record = whois.whois(domain)
         creation = record.creation_date

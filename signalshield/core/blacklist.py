@@ -1,5 +1,3 @@
-"""Этап 1: проверка по чёрному списку CERT Polska."""
-
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -10,9 +8,21 @@ BLACKLIST_URL = "https://hole.cert.pl/domains/domains.txt"
 CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "cert_blacklist.csv"
 CACHE_MAX_AGE_HOURS = 6
 
+FALLBACK_DOMAINS = {
+    "allegro-platnosc24.pl",
+    "allegro-platnosc.pl",
+    "mbank-logowanie.com",
+    "mbank-login24.pl",
+    "mbank-secure.pl",
+    "pko-bp-login.pl",
+    "ing-bank.pl",
+    "olx-payment.pl",
+    "inpost-delivery.pl",
+    "vinted-pay.pl",
+}
+
 
 def extract_domain(url: str) -> str:
-    """Извлекает зарегистрированный домен из URL."""
     extracted = tldextract.extract(url)
     if not extracted.domain or not extracted.suffix:
         return url.lower().strip()
@@ -40,7 +50,6 @@ def _cache_is_fresh() -> bool:
 
 
 def download_blacklist() -> set[str]:
-    """Скачивает список CERT и кэширует в data/cert_blacklist.csv."""
     try:
         response = requests.get(BLACKLIST_URL, timeout=10)
         response.raise_for_status()
@@ -55,14 +64,16 @@ def download_blacklist() -> set[str]:
             file.write("\n".join(sorted(domains)))
         return domains
     except Exception:
-        return _load_cached_domains()
+        cached = _load_cached_domains()
+        return cached if cached else set(FALLBACK_DOMAINS)
+
+
+def _get_blacklist_domains() -> set[str]:
+    if not _cache_is_fresh():
+        return download_blacklist()
+    cached = _load_cached_domains()
+    return cached if cached else set(FALLBACK_DOMAINS)
 
 
 def check_blacklist(domain: str) -> bool:
-    """Проверяет домен по кэшированному чёрному списку."""
-    if not _cache_is_fresh():
-        domains = download_blacklist()
-    else:
-        domains = _load_cached_domains()
-
-    return domain.lower() in domains
+    return domain.lower() in _get_blacklist_domains()
