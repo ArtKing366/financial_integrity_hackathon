@@ -1,6 +1,12 @@
 import streamlit as st
 
-from core.verdict import VERDICT_DANGEROUS, VERDICT_SAFE, VERDICT_SUSPICIOUS, analyze_url
+from core.verdict import (
+    VERDICT_DANGEROUS,
+    VERDICT_NOT_FOUND,
+    VERDICT_SAFE,
+    VERDICT_SUSPICIOUS,
+    analyze_url,
+)
 
 st.set_page_config(page_title="SignalShield PL", page_icon="🛡️")
 
@@ -17,6 +23,22 @@ if st.button("Analyze") and url:
         st.error(f"⛔ {result['verdict']} (risk: {result['score']}%)")
     elif result["verdict"] == VERDICT_SUSPICIOUS:
         st.warning(f"⚠️ {result['verdict']} (risk: {result['score']}%)")
+    elif result["verdict"] == VERDICT_NOT_FOUND:
+        st.markdown(
+            f"""
+            <div style="
+                padding: 0.75rem 1rem;
+                border-radius: 0.5rem;
+                background-color: #ececec;
+                border: 1px solid #b8b8b8;
+                color: #4a4a4a;
+                font-size: 1rem;
+            ">
+                The page not found
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     else:
         st.success(f"✅ {result['verdict']}")
 
