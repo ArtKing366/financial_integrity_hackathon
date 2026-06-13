@@ -52,6 +52,6 @@ if st.button("Analyze") and url:
 
 st.divider()
 st.caption(
-    "Stage 1: CERT Polska blacklist | Stage 2: WHOIS domain age | "
-    "Stage 3: Levenshtein similarity | Stage 4: Page content rules"
+    "Stage 1: CERT blacklist | Stage 2: WHOIS age | Stage 3: Similarity | "
+    "Stage 4: Shannon entropy | Stage 5: Page content rules"
 )

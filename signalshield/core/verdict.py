@@ -50,6 +50,11 @@ try:
 except Exception:
     analyze_url_heuristics = None
 
+try:
+    from core.entropy import check_domain_entropy
+except Exception:
+    check_domain_entropy = None
+
 
 def load_trusted_brands() -> list[str]:
     project_root = Path(__file__).resolve().parents[1]
@@ -141,6 +146,7 @@ def _details(url: str, hostname: str, domain: str) -> dict:
         "domain_age_days": None,
         "similarity_results": [],
         "url_heuristics": None,
+        "domain_entropy": None,
     }
 
 
@@ -261,6 +267,24 @@ def analyze_url(url: str) -> dict:
             reasons.append("Domain is relatively new - less than 90 days old.")
     else:
         details["whois_status"] = "WHOIS module is not available."
+
+    if check_domain_entropy is not None:
+        try:
+            entropy_result = check_domain_entropy(url)
+        except Exception as error:
+            entropy_result = {
+                "flagged": False,
+                "score": 0,
+                "error": str(error),
+            }
+
+        details["domain_entropy"] = entropy_result
+        risk_score += int(entropy_result.get("score", 0) or 0)
+
+        if entropy_result.get("description"):
+            reasons.append(entropy_result["description"])
+    else:
+        details["domain_entropy"] = "Domain entropy module is not available."
 
     if analyze_url_heuristics is not None:
         try:
