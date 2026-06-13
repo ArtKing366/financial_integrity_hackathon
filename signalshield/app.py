@@ -1,36 +1,34 @@
-"""Streamlit-интерфейс SignalShield PL."""
-
 import streamlit as st
 
-from core.verdict import analyze_url
+from core.verdict import VERDICT_DANGEROUS, VERDICT_SAFE, VERDICT_SUSPICIOUS, analyze_url
 
 st.set_page_config(page_title="SignalShield PL", page_icon="🛡️")
 
 st.title("🛡️ SignalShield PL")
-st.subheader("Проверка безопасности ссылок перед оплатой")
+st.subheader("Check link safety before you pay")
 
-url = st.text_input("Вставьте ссылку для проверки:", placeholder="https://example.pl")
+url = st.text_input("Paste a link to analyze:", placeholder="https://example.pl")
 
-if st.button("Проверить") and url:
-    with st.spinner("Анализируем..."):
+if st.button("Analyze") and url:
+    with st.spinner("Analyzing..."):
         result = analyze_url(url)
 
-    if result["verdict"] == "ОПАСНО":
-        st.error(f"⛔ {result['verdict']} (риск: {result['score']}%)")
-    elif result["verdict"] == "ПОДОЗРИТЕЛЬНО":
-        st.warning(f"⚠️ {result['verdict']} (риск: {result['score']}%)")
+    if result["verdict"] == VERDICT_DANGEROUS:
+        st.error(f"⛔ {result['verdict']} (risk: {result['score']}%)")
+    elif result["verdict"] == VERDICT_SUSPICIOUS:
+        st.warning(f"⚠️ {result['verdict']} (risk: {result['score']}%)")
     else:
         st.success(f"✅ {result['verdict']}")
 
     if result.get("reasons"):
-        st.write("**Причины:**")
+        st.write("**Reasons:**")
         for reason in result["reasons"]:
             st.write(f"- {reason}")
 
-    with st.expander("Технические детали"):
+    with st.expander("Technical details"):
         st.json(result)
 
 st.divider()
 st.caption(
-    "Этап 1: CERT Polska blacklist | Этап 2: WHOIS возраст домена | Этап 3: Алгоритм Левенштейна"
+    "Stage 1: CERT Polska blacklist | Stage 2: WHOIS domain age | Stage 3: Levenshtein similarity"
 )
