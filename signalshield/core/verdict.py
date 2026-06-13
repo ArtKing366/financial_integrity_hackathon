@@ -169,6 +169,190 @@ def format_similarity_reason(similarity_results: list) -> str:
     return f"Domain is similar to a trusted brand: {best_match}."
 
 
+# Optional imports — приложение не упадёт, если какой-то модуль ещё не готов
+try:
+    from core.blacklist import check_blacklist
+except Exception:
+    check_blacklist = None
+
+
+try:
+    from core.whois_check import get_domain_age
+except Exception:
+    get_domain_age = None
+
+
+try:
+    from core.similarity import check_similarity
+except Exception:
+    check_similarity = None
+
+
+try:
+    from core.page_rules import analyze_page_rules
+except Exception:
+    analyze_page_rules = None
+
+
+def normalize_url(url: str) -> str:
+    """
+    Делает URL пригодным для анализа.
+    Если пользователь ввёл example.pl, превращаем в https://example.pl
+    """
+    url = url.strip()
+
+    if not url:
+        return ""
+
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    return url
+
+
+def extract_hostname(url: str) -> str:
+    """
+    Извлекает hostname из URL.
+
+    https://example.pl/test -> example.pl
+    """
+    parsed = urlparse(url)
+    return parsed.hostname.lower() if parsed.hostname else ""
+
+
+def extract_registered_domain(url: str) -> str:
+    """
+    Возвращает основной домен.
+
+    https://login.example.pl/test -> example.pl
+
+    Если tldextract не установлен, используем простой fallback.
+    """
+    hostname = extract_hostname(url)
+
+    if not hostname:
+        return ""
+
+    try:
+        import tldextract
+
+        extracted = tldextract.extract(hostname)
+
+        if extracted.domain and extracted.suffix:
+            return f"{extracted.domain}.{extracted.suffix}"
+
+        return hostname
+
+    except Exception:
+        parts = hostname.split(".")
+
+        if len(parts) >= 2:
+            return ".".join(parts[-2:])
+
+        return hostname
+
+
+def load_trusted_brands() -> list[str]:
+    """
+    Загружает список доверенных доменов из data/trusted_brands.json.
+
+    Поддерживает формат:
+    {
+      "banks": ["mbank.pl", "ing.pl"],
+      "shopping": ["allegro.pl"]
+    }
+    """
+    project_root = Path(__file__).resolve().parents[1]
+    trusted_path = project_root / "data" / "trusted_brands.json"
+
+    if not trusted_path.exists():
+        return []
+
+    try:
+        with trusted_path.open("r", encoding="utf-8") as file:
+            data = json.load(file)
+
+        trusted_domains = []
+
+        if isinstance(data, dict):
+            for value in data.values():
+                if isinstance(value, list):
+                    trusted_domains.extend(value)
+
+        elif isinstance(data, list):
+            trusted_domains = data
+
+        return [domain.lower().strip() for domain in trusted_domains if domain]
+
+    except Exception:
+        return []
+
+
+def run_similarity_check(domain: str) -> list:
+    """
+    Запускает similarity-модуль.
+
+    Сделано гибко, потому что у check_similarity могут быть разные сигнатуры:
+    1. check_similarity(domain, trusted_list)
+    2. check_similarity(domain)
+    """
+    if check_similarity is None:
+        return []
+
+    trusted_brands = load_trusted_brands()
+
+    try:
+        return check_similarity(domain, trusted_brands)
+    except TypeError:
+        try:
+            return check_similarity(domain)
+        except Exception:
+            return []
+    except Exception:
+        return []
+
+
+def format_similarity_reason(similarity_results: list) -> str:
+    """
+    Формирует понятную причину для UI.
+    """
+    if not similarity_results:
+        return ""
+
+    best_match = similarity_results[0]
+
+    if isinstance(best_match, tuple) and len(best_match) >= 2:
+        trusted_domain = best_match[0]
+        ratio = best_match[1]
+
+        try:
+            percent = round(float(ratio) * 100)
+            return f"Domain is similar to trusted brand {trusted_domain} ({percent}% similarity)."
+        except Exception:
+            return f"Domain is similar to trusted brand {trusted_domain}."
+
+    if isinstance(best_match, dict):
+        trusted_domain = (
+            best_match.get("trusted")
+            or best_match.get("domain")
+            or best_match.get("brand")
+            or "trusted brand"
+        )
+
+        ratio = best_match.get("ratio") or best_match.get("similarity")
+
+        if ratio is not None:
+            try:
+                percent = round(float(ratio) * 100)
+                return f"Domain is similar to trusted brand {trusted_domain} ({percent}% similarity)."
+            except Exception:
+                pass
+
+        return f"Domain is similar to trusted brand {trusted_domain}."
+
+    return f"Domain is similar to a trusted brand: {best_match}."
+
+
 def analyze_url(url: str) -> dict:
     url = normalize_url(url)
     hostname = extract_hostname(url)

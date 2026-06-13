@@ -3,7 +3,8 @@ plan_RU.md
 plan_PL.md
 plan_pl.md
 gitcomm.md
-data/cert.blacklist.csv
+cert_blacklist.csv
+
 # Python
 __pycache__/
 *.py[cod]
