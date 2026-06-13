@@ -26,11 +26,11 @@ def extract_hostname(url: str) -> str:
 
 def check_dns_exists(hostname: str) -> tuple[bool, str | None]:
     """
-    Проверяет, существует ли домен на уровне DNS.
+    Check whether the domain exists at the DNS level.
 
-    Возвращает:
-    (True, None) — DNS найден
-    (False, error) — DNS не найден
+    Returns:
+    (True, None) when DNS resolution succeeds.
+    (False, error) when DNS resolution fails.
     """
     try:
         socket.getaddrinfo(hostname, None)
@@ -42,15 +42,15 @@ def check_dns_exists(hostname: str) -> tuple[bool, str | None]:
 
 def check_page_existence(url: str) -> dict:
     """
-    Проверяет, существует ли страница.
+    Check whether a page appears to exist.
 
-    Возможные статусы:
-    - exists — страница существует
-    - not_found — страница вернула 404 или 410
-    - domain_not_found — домен не найден через DNS
-    - unreachable — домен есть, но сервер недоступен
-    - unknown — невозможно точно определить
-    - invalid_url — некорректный URL
+    Possible statuses:
+    - exists: the page exists
+    - not_found: the page returned 404 or 410
+    - domain_not_found: the domain could not be resolved through DNS
+    - unreachable: the domain exists, but the server could not be reached
+    - unknown: there is not enough evidence to decide
+    - invalid_url: the URL is invalid
     """
     url = normalize_url(url)
     hostname = extract_hostname(url)

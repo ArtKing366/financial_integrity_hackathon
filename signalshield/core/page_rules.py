@@ -1,5 +1,5 @@
 import re
-from urllib.parse import urlparse, urljoin, parse_qs
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -78,10 +78,9 @@ def is_trusted_microsoft_login(hostname: str) -> bool:
 
 def fetch_page(url: str) -> tuple[str | None, str | None]:
     """
-    Возвращает:
-    (html, error)
+    Return the fetched HTML and an error message.
 
-    Если страницу получить нельзя — html=None, error='...'
+    If the page cannot be fetched, html is None and error contains the reason.
     """
     try:
         response = requests.get(
@@ -103,7 +102,7 @@ def fetch_page(url: str) -> tuple[str | None, str | None]:
 
         html = response.text
 
-        # Защита от слишком больших страниц
+        # Avoid processing unexpectedly large pages.
         if len(html) > 2_000_000:
             html = html[:2_000_000]
 
@@ -168,10 +167,10 @@ def has_login_field(soup: BeautifulSoup) -> bool:
 
 def form_action_is_suspicious(soup: BeautifulSoup, page_url: str) -> bool:
     """
-    Проверяет формы на странице.
+    Check page forms for suspicious credential submission targets.
 
-    Если есть форма с паролем, но action ведёт не на Microsoft login,
-    это сильный фишинговый признак.
+    A password form that does not submit to an official Microsoft login domain
+    is a strong phishing indicator.
     """
     forms = soup.find_all("form")
 
@@ -183,8 +182,8 @@ def form_action_is_suspicious(soup: BeautifulSoup, page_url: str) -> bool:
 
         action = form.get("action", "").strip()
 
-        # Если action пустой, форма отправляется на тот же домен.
-        # Если это не официальный Microsoft login — подозрительно.
+        # An empty action submits the form to the current domain.
+        # That is suspicious unless the current domain is an official Microsoft login host.
         if not action:
             return True
 
@@ -199,7 +198,7 @@ def form_action_is_suspicious(soup: BeautifulSoup, page_url: str) -> bool:
 
 def detect_js_form_action_modification(html: str) -> bool:
     """
-    Ищет JavaScript, который меняет form.action при отправке формы.
+    Detect JavaScript that changes form.action during form submission.
     """
     patterns = [
         r"addEventListener\s*\(\s*['\"]submit['\"]",
@@ -230,9 +229,9 @@ def has_long_query_parameter(url: str) -> bool:
 
 def analyze_page_rules(url: str) -> dict:
     """
-    Анализирует содержимое страницы по правилам, похожим на CyberDrain/Check.
+    Analyze page content with rules inspired by CyberDrain/Check.
 
-    Возвращает:
+    Returns:
     {
         "score": int,
         "hard_block": bool,
@@ -254,7 +253,7 @@ def analyze_page_rules(url: str) -> dict:
         result["fetch_error"] = "Invalid URL"
         return result
 
-    # Официальный Microsoft login не считаем фишингом.
+    # Official Microsoft login hosts should not be treated as phishing.
     if is_trusted_microsoft_login(hostname):
         result["matched_rules"].append({
             "id": "trusted_microsoft_login",
@@ -276,7 +275,7 @@ def analyze_page_rules(url: str) -> dict:
             "score": 25,
         })
 
-    # Data URI — отдельный опасный случай.
+    # Data URIs are a separate high-risk case.
     if url.lower().startswith("data:text/html"):
         result["score"] += 60
         result["hard_block"] = True
@@ -308,7 +307,7 @@ def analyze_page_rules(url: str) -> dict:
     aad_matches = detect_aad_fingerprint(html)
     suspicious_text_matches = detect_suspicious_text(page_text)
 
-    # 1. AAD fingerprint на чужом домене
+    # 1. AAD fingerprint on a non-Microsoft domain
     if len(aad_matches) >= 2:
         result["score"] += 35
         result["matched_rules"].append({
@@ -319,7 +318,7 @@ def analyze_page_rules(url: str) -> dict:
             "score": 35,
         })
 
-    # 2. Microsoft branding + поля логина/пароля
+    # 2. Microsoft branding plus login/password fields
     if microsoft_branding and password_field and login_field:
         result["score"] += 30
         result["matched_rules"].append({
@@ -329,7 +328,7 @@ def analyze_page_rules(url: str) -> dict:
             "score": 30,
         })
 
-    # 3. Форма с паролем отправляется не на Microsoft
+    # 3. Password form submits to a non-Microsoft target
     if form_action_is_suspicious(soup, url):
         result["score"] += 45
         result["hard_block"] = True
@@ -340,7 +339,7 @@ def analyze_page_rules(url: str) -> dict:
             "score": 45,
         })
 
-    # 4. JS меняет action формы
+    # 4. JavaScript changes the form action
     if detect_js_form_action_modification(html):
         result["score"] += 35
         result["matched_rules"].append({
@@ -350,7 +349,7 @@ def analyze_page_rules(url: str) -> dict:
             "score": 35,
         })
 
-    # 5. Длинные query-параметры + Microsoft branding + форма
+    # 5. Long query parameters plus Microsoft branding and a form
     if has_long_query_parameter(url) and microsoft_branding and (password_field or login_field):
         result["score"] += 20
         result["matched_rules"].append({
@@ -360,7 +359,7 @@ def analyze_page_rules(url: str) -> dict:
             "score": 20,
         })
 
-    # 6. Социальная инженерия
+    # 6. Social engineering language
     if microsoft_branding and suspicious_text_matches:
         result["score"] += 15
         result["matched_rules"].append({
