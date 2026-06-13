@@ -7,6 +7,7 @@ Link safety checker for Polish e-commerce and banking - helps users avoid phishi
 ```text
 signalshield/
 |-- app.py                 # Streamlit UI
+|-- browser_extension/     # Chrome/Edge extension GUI
 |-- core/
 |   |-- blacklist.py       # Stage 1 - CERT Polska blacklist
 |   |-- message_analyzer.py
@@ -61,6 +62,18 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+The Streamlit analyzer also supports direct links from the browser extension:
+
+```text
+http://localhost:8501/?mode=link&url=https%3A%2F%2Fexample.pl&auto=1
+```
+
+## Browser Extension
+
+The `browser_extension/` folder contains a Manifest V3 Chrome/Edge extension. It scans the current page in real time, highlights links by risk color, shows hover explanations, and opens the Streamlit analyzer with the selected URL pre-filled.
+
+Install it through `chrome://extensions` -> Developer mode -> Load unpacked -> `signalshield/browser_extension`.
+
 ## Tests
 
 ```bash
@@ -84,6 +97,8 @@ Message mode also supports full texts such as:
 Pilne: dopłata do paczki 1.99 zł. Zaloguj się: vasiapupkin.xyz/allegro.pl/pay/blik-secure
 ```
 
-## Future: browser extension
+## Browser Extension Details
 
-The modular `core/` package exposes a stable verdict API. A Chrome/Firefox extension can call the same logic via a thin HTTP wrapper or bundled Python runtime.
+The browser extension is a second GUI for the same project. It performs a fast local JavaScript pass on every link in the current page, colors links by risk, shows hover explanations, and opens the Streamlit analyzer with the selected URL pre-filled and auto-run.
+
+See [browser_extension/README.md](browser_extension/README.md) for installation steps.

@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "SignalShield Link Highlighter",
+  "version": "0.1.0",
+  "description": "Highlights risky financial links on the current page and opens SignalShield for full analysis.",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "SignalShield",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -467,17 +467,46 @@ def render_message_details(result: dict) -> None:
         st.json(result)
 
 
+def get_query_param(name: str, default: str = "") -> str:
+    try:
+        value = st.query_params.get(name, default)
+    except Exception:
+        values = st.experimental_get_query_params().get(name, [default])
+        value = values[0] if values else default
+
+    if isinstance(value, list):
+        return value[0] if value else default
+
+    return value or default
+
+
 st.set_page_config(page_title="SignalShield PL", page_icon="🛡️")
 
 st.title("🛡️ SignalShield PL")
 st.subheader("Check financial scam risk before you pay")
 
-mode = st.radio("Analysis mode", ["Single link", "Full message"], horizontal=True)
+query_url = get_query_param("url")
+query_mode = get_query_param("mode")
+query_auto = get_query_param("auto").lower() in {"1", "true", "yes"}
+mode_options = ["Single link", "Full message"]
+default_mode_index = 1 if query_mode == "message" else 0
+
+mode = st.radio(
+    "Analysis mode",
+    mode_options,
+    index=default_mode_index,
+    horizontal=True,
+)
 
 if mode == "Single link":
-    url = st.text_input("Paste a link to analyze:", placeholder="https://example.pl")
+    url = st.text_input(
+        "Paste a link to analyze:",
+        value=query_url,
+        placeholder="https://example.pl",
+    )
+    should_analyze_link = st.button("Analyze link") or bool(query_url and query_auto)
 
-    if st.button("Analyze link") and url:
+    if should_analyze_link and url:
         with st.spinner("Analyzing link..."):
             result = analyze_url(url)
 
