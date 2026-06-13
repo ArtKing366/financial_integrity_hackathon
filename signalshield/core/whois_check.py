@@ -1,35 +1,21 @@
 import socket
-from datetime import datetime, date
+from datetime import date, datetime
 from typing import Optional
-from urllib.parse import urlparse
 
-import whois
-import tldextract
+from core.domain_utils import extract_registered_domain
+
+try:
+    import whois
+except Exception:
+    whois = None
+
 
 socket.setdefaulttimeout(5)
 
 
 def extract_domain(url_or_domain: str) -> Optional[str]:
-    value = url_or_domain.strip().lower()
-
-    if not value:
-        return None
-
-    if "://" not in value:
-        value = "http://" + value
-
-    parsed = urlparse(value)
-    hostname = parsed.hostname
-
-    if not hostname:
-        return None
-
-    extracted = tldextract.extract(hostname)
-
-    if not extracted.domain or not extracted.suffix:
-        return None
-
-    return f"{extracted.domain}.{extracted.suffix}"
+    domain = extract_registered_domain(url_or_domain)
+    return domain or None
 
 
 def normalize_creation_date(creation):
@@ -56,7 +42,7 @@ def normalize_creation_date(creation):
 def get_domain_age(domain_or_url: str) -> Optional[int]:
     domain = extract_domain(domain_or_url)
 
-    if not domain:
+    if not domain or whois is None:
         return None
 
     try:
@@ -78,6 +64,5 @@ def get_domain_age(domain_or_url: str) -> Optional[int]:
 
         return age_days
 
-    except Exception as e:
-        print(f"WHOIS error for {domain}: {e}")
+    except Exception:
         return None

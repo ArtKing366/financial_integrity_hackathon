@@ -1,8 +1,13 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import requests
-import tldextract
+from core.domain_utils import extract_registered_domain
+
+try:
+    import requests
+except Exception:
+    requests = None
+
 
 BLACKLIST_URL = "https://hole.cert.pl/domains/domains.txt"
 CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "cert_blacklist.csv"
@@ -22,11 +27,8 @@ FALLBACK_DOMAINS = {
 }
 
 
-def extract_domain(url: str) -> str:
-    extracted = tldextract.extract(url)
-    if not extracted.domain or not extracted.suffix:
-        return url.lower().strip()
-    return f"{extracted.domain}.{extracted.suffix}".lower()
+def extract_domain(url_or_domain: str) -> str:
+    return extract_registered_domain(url_or_domain).lower().strip()
 
 
 def _load_cached_domains() -> set[str]:
@@ -50,6 +52,10 @@ def _cache_is_fresh() -> bool:
 
 
 def download_blacklist() -> set[str]:
+    if requests is None:
+        cached = _load_cached_domains()
+        return cached if cached else set(FALLBACK_DOMAINS)
+
     try:
         response = requests.get(BLACKLIST_URL, timeout=10)
         response.raise_for_status()
@@ -72,8 +78,11 @@ def _get_blacklist_domains() -> set[str]:
     if not _cache_is_fresh():
         return download_blacklist()
     cached = _load_cached_domains()
-    return cached if cached else set(FALLBACK_DOMAINS)
+    return cached | set(FALLBACK_DOMAINS)
 
 
-def check_blacklist(domain: str) -> bool:
-    return domain.lower() in _get_blacklist_domains()
+def check_blacklist(url_or_domain: str) -> bool:
+    value = url_or_domain.lower().strip()
+    domain = extract_domain(value)
+    blacklist = _get_blacklist_domains()
+    return value in blacklist or domain in blacklist
