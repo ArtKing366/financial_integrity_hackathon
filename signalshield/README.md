@@ -9,6 +9,7 @@ signalshield/
 |-- app.py                 # Streamlit UI
 |-- core/
 |   |-- blacklist.py       # Stage 1 - CERT Polska blacklist
+|   |-- message_analyzer.py
 |   |-- subdomain_spoofing.py
 |   |-- page_existence.py
 |   |-- dns_infrastructure.py
@@ -29,19 +30,20 @@ signalshield/
 `-- README.md
 ```
 
-Independent check modules feed a single `analyze_url()` API. The same API can power the Streamlit UI today and a browser extension tomorrow.
+Independent check modules feed a single `analyze_url()` API for links and `analyze_message()` for full SMS/email/chat text. The same APIs can power the Streamlit UI today and a browser extension tomorrow.
 
 ## Pipeline
 
 1. **blacklist** - O(1) lookup against the CERT Polska list, with a local cache and offline demo fallback.
 2. **subdomain_spoofing** - catches URLs such as `mbank.pl.secure-pay.com`, where the trusted brand is only in the subdomain.
 3. **page_existence** - separates missing domains/pages from reachable pages without overriding stronger phishing signals.
-4. **dns_infrastructure** - checks whether untrusted domains resolve and have MX records configured.
+4. **dns_infrastructure** - checks whether untrusted domains resolve and have MX records configured; missing MX is treated as a weak signal.
 5. **whois_check** - uses domain registration age when WHOIS data is available.
-6. **html_crawler** - quickly fetches HTML and looks for password fields or Polish login/payment markers on untrusted domains.
+6. **html_crawler** - quickly fetches HTML and looks for password fields or Polish login/payment markers on untrusted domains; these signals are capped to reduce false positives.
 7. **url_heuristics** - checks suspicious path keywords on untrusted domains and unusually long or hyphen-heavy domains.
 8. **similarity** - detects typosquatting, brand substrings, and homograph attacks against trusted brands.
-9. **page_rules** - optional content rules for Microsoft-like login pages and credential forms.
+9. **page_rules** - optional Microsoft-specific content rules for fake Microsoft login pages.
+10. **message_analyzer** - extracts every link from a message, analyzes each URL, and adds social-engineering context such as urgency, BLIK/SMS code requests, remote access requests, and investment-scam language.
 
 Verdict thresholds: score >= 50 -> DANGEROUS, score >= 20 -> SUSPICIOUS, else SAFE.
 
@@ -75,6 +77,12 @@ pytest
 | `https://allegro-platnosc24.pl` | DANGEROUS |
 | `https://vasiapupkin.xyz/allegro.pl/pay/blik-secure` | SUSPICIOUS |
 | `https://inpost-paczka-za-pobraniem-24.pl` | DANGEROUS |
+
+Message mode also supports full texts such as:
+
+```text
+Pilne: dopłata do paczki 1.99 zł. Zaloguj się: vasiapupkin.xyz/allegro.pl/pay/blik-secure
+```
 
 ## Future: browser extension
 

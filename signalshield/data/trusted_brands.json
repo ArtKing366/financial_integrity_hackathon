@@ -5,18 +5,41 @@
     "santander.pl",
     "ing.pl",
     "millennium.pl",
+    "bankmillennium.pl",
     "pekao.com.pl",
-    "aliorbank.pl"
+    "aliorbank.pl",
+    "nestbank.pl",
+    "bnpparibas.pl",
+    "citibank.pl",
+    "velobank.pl",
+    "credit-agricole.pl",
+    "bosbank.pl",
+    "pocztowy.pl",
+    "toyotabank.pl",
+    "bankbps.pl",
+    "sgb.pl"
   ],
   "shopping": [
     "allegro.pl",
     "olx.pl",
-    "vinted.pl"
+    "vinted.pl",
+    "empik.com",
+    "mediaexpert.pl",
+    "x-kom.pl",
+    "morele.net",
+    "ceneo.pl"
   ],
   "delivery": [
     "inpost.pl",
     "dpd.com.pl",
     "dhl.com",
     "poczta-polska.pl"
+  ],
+  "payments": [
+    "blik.com",
+    "payu.com",
+    "przelewy24.pl",
+    "tpay.com",
+    "autopay.pl"
   ]
 }

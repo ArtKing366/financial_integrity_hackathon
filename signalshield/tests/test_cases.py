@@ -17,7 +17,25 @@ TEST_CASES = [
 
 @pytest.mark.parametrize("url,expected_verdict", TEST_CASES)
 def test_analyze_url_cases(url: str, expected_verdict: str) -> None:
-    with patch("core.verdict.get_domain_age", return_value=None):
-        with patch("core.verdict.check_blacklist", return_value=False):
-            result = analyze_url(url)
+    with (
+        patch("core.verdict.get_domain_age", return_value=None),
+        patch("core.verdict.check_blacklist", return_value=False),
+        patch(
+            "core.verdict.check_page_existence",
+            return_value={"status": "exists", "exists": True, "evidence": []},
+        ),
+        patch(
+            "core.verdict.analyze_dns_infrastructure",
+            return_value={"score": 0, "status": "mx_found"},
+        ),
+        patch(
+            "core.verdict.analyze_html_crawling",
+            return_value={"score": 0, "matched_rules": []},
+        ),
+        patch(
+            "core.verdict.analyze_page_rules",
+            return_value={"score": 0, "hard_block": False, "matched_rules": []},
+        ),
+    ):
+        result = analyze_url(url)
     assert result["verdict"] == expected_verdict

@@ -1,5 +1,6 @@
 import streamlit as st
 
+from core.message_analyzer import analyze_message
 from core.verdict import (
     VERDICT_DANGEROUS,
     VERDICT_NOT_FOUND,
@@ -351,36 +352,164 @@ def render_technical_details(result: dict) -> None:
         st.json(result)
 
 
-st.set_page_config(page_title="SignalShield PL", page_icon="🛡️")
-
-st.title("🛡️ SignalShield PL")
-st.subheader("Check link safety before you pay")
-
-url = st.text_input("Paste a link to analyze:", placeholder="https://example.pl")
-
-if st.button("Analyze") and url:
-    with st.spinner("Analyzing..."):
-        result = analyze_url(url)
-
+def render_verdict_banner(result: dict, not_found_label: str = "Page not found") -> None:
     if result["verdict"] == VERDICT_DANGEROUS:
         st.error(f"⛔ {result['verdict']} (risk: {result['score']}%)")
     elif result["verdict"] == VERDICT_SUSPICIOUS:
         st.warning(f"⚠️ {result['verdict']} (risk: {result['score']}%)")
     elif result["verdict"] == VERDICT_NOT_FOUND:
-        st.info("Page not found")
+        st.info(not_found_label)
     else:
         st.success(f"✅ {result['verdict']}")
 
-    if result.get("reasons"):
-        st.write("**Reasons:**")
-        for reason in result["reasons"]:
-            st.write(f"- {reason}")
 
-    with st.expander("Technical details", expanded=True):
-        render_technical_details(result)
+def render_reasons(result: dict) -> None:
+    if not result.get("reasons"):
+        return
+
+    st.write("**Reasons:**")
+    for reason in result["reasons"]:
+        st.write(f"- {reason}")
+
+
+def message_link_rows(result: dict) -> list[dict[str, str]]:
+    rows = []
+
+    for index, link in enumerate(result.get("links", []), start=1):
+        characteristics = link.get("characteristics", {})
+        rows.append({
+            "#": str(index),
+            "URL": link.get("url", ""),
+            "Domain": characteristics.get("registered_domain", ""),
+            "Verdict": link.get("verdict", ""),
+            "URL risk": f"{link.get('score', 0)}%",
+            "Link signs": risk_label(characteristics.get("score", 0)),
+        })
+
+    return rows
+
+
+def render_message_details(result: dict) -> None:
+    overview_tab, links_tab, raw_tab = st.tabs(["Overview", "Links", "Raw payload"])
+    details = result.get("details", {})
+    message_signals = result.get("message_signals", {})
+
+    with overview_tab:
+        st.markdown("#### Message summary")
+        summary_cols = st.columns(4)
+        summary_cols[0].metric("Verdict", result.get("verdict", "UNKNOWN"))
+        summary_cols[1].metric("Risk score", f"{result.get('score', 0)}%")
+        summary_cols[2].metric("Links found", details.get("link_count", 0))
+        summary_cols[3].metric("Domains", len(details.get("unique_domains", [])))
+
+        st.table(table_rows({
+            "message_length": details.get("message_length"),
+            "unique_domains": details.get("unique_domains"),
+            "max_link_score": details.get("max_link_score"),
+            "message_signal_score": details.get("message_signal_score"),
+            "link_characteristic_score": details.get("link_characteristic_score"),
+        }))
+
+        render_stage_section(
+            "Message context",
+            "Signal found" if message_signals.get("score", 0) else "Clear",
+            message_signals.get("score", 0),
+            "Looks for social-engineering markers in the whole message.",
+            {"total_score": message_signals.get("score", 0)},
+            rules=message_signals.get("matched_rules", []),
+        )
+
+        rows = message_link_rows(result)
+        if rows:
+            st.markdown("#### Link overview")
+            st.table(rows)
+        else:
+            st.info("No links were found in the message.")
+
+    with links_tab:
+        links = result.get("links", [])
+
+        if not links:
+            st.info("No links to inspect.")
+        else:
+            for index, link in enumerate(links, start=1):
+                title = (
+                    f"{index}. {link.get('verdict', 'UNKNOWN')} "
+                    f"({link.get('score', 0)}%) - {link.get('url', '')}"
+                )
+                with st.expander(title):
+                    characteristics = link.get("characteristics", {})
+                    st.markdown("#### Link characteristics")
+                    st.table(table_rows({
+                        "original": link.get("original"),
+                        "normalized_url": link.get("url"),
+                        "hostname": characteristics.get("hostname"),
+                        "registered_domain": characteristics.get("registered_domain"),
+                        "uses_https": characteristics.get("uses_https"),
+                        "is_shortener": characteristics.get("is_shortener"),
+                        "is_ip_host": characteristics.get("is_ip_host"),
+                        "has_userinfo_trick": characteristics.get("has_userinfo_trick"),
+                        "tld": characteristics.get("tld"),
+                        "characteristic_score": characteristics.get("score"),
+                    }))
+                    render_rule_list(characteristics.get("matched_rules", []))
+
+                    if link.get("reasons"):
+                        st.markdown("#### URL verdict reasons")
+                        for reason in link["reasons"]:
+                            st.markdown(f"- {reason}")
+
+                    st.markdown("#### URL analysis details")
+                    render_technical_details(link.get("analysis", {}))
+
+    with raw_tab:
+        st.caption("Raw message analyzer payload is kept here for debugging.")
+        st.json(result)
+
+
+st.set_page_config(page_title="SignalShield PL", page_icon="🛡️")
+
+st.title("🛡️ SignalShield PL")
+st.subheader("Check financial scam risk before you pay")
+
+mode = st.radio("Analysis mode", ["Single link", "Full message"], horizontal=True)
+
+if mode == "Single link":
+    url = st.text_input("Paste a link to analyze:", placeholder="https://example.pl")
+
+    if st.button("Analyze link") and url:
+        with st.spinner("Analyzing link..."):
+            result = analyze_url(url)
+
+        render_verdict_banner(result)
+        render_reasons(result)
+
+        with st.expander("Technical details", expanded=True):
+            render_technical_details(result)
+
+else:
+    message = st.text_area(
+        "Paste the full SMS, email, or chat message:",
+        height=180,
+        placeholder=(
+            "Pilne: dopłata do paczki 1.99 zł. "
+            "Zaloguj się: vasiapupkin.xyz/allegro.pl/pay/blik-secure"
+        ),
+    )
+
+    if st.button("Analyze message") and message:
+        with st.spinner("Analyzing message and all detected links..."):
+            result = analyze_message(message)
+
+        render_verdict_banner(result, not_found_label="Message is empty or could not be analyzed")
+        render_reasons(result)
+
+        with st.expander("Message analysis details", expanded=True):
+            render_message_details(result)
 
 st.divider()
 st.caption(
     "Checks: blacklist, subdomain spoofing, page existence, DNS/MX, WHOIS age, "
-    "entropy, HTML crawler, URL heuristics, brand similarity, page content rules."
+    "entropy, HTML crawler, URL heuristics, brand similarity, page content rules, "
+    "and full-message social engineering signals."
 )

@@ -12,26 +12,39 @@ except Exception:
 
 REQUEST_TIMEOUT = 5
 MAX_HTML_BYTES = 500_000
-PASSWORD_FIELD_SCORE = 35
-HIDDEN_PASSWORD_FIELD_SCORE = 50
-BRAND_MARKER_SCORE = 20
+PASSWORD_FIELD_SCORE = 15
+HIDDEN_PASSWORD_FIELD_SCORE = 35
+BRAND_MARKER_SCORE = 10
+MAX_HTML_CRAWLER_SCORE = 40
 
 SENSITIVE_TEXT_MARKERS = {
     "blik": r"\bblik\b",
     "zaloguj": r"\bzaloguj\b",
     "logowanie": r"\blogowanie\b",
     "platnosc": r"\bplatnosc\b",
-    "płatność": r"\bpłatnosc\b",
     "haslo": r"\bhaslo\b",
     "konto": r"\bkonto\b",
     "kod sms": r"\bkod\s+sms\b",
 }
 
+POLISH_CHAR_MAP = str.maketrans({
+    "ą": "a",
+    "ć": "c",
+    "ę": "e",
+    "ł": "l",
+    "ń": "n",
+    "ó": "o",
+    "ś": "s",
+    "ż": "z",
+    "ź": "z",
+})
+
 
 def normalize_text(value: str) -> str:
     value = unquote(value).lower()
     nfkd = unicodedata.normalize("NFKD", value)
-    return "".join(char for char in nfkd if not unicodedata.combining(char))
+    value = "".join(char for char in nfkd if not unicodedata.combining(char))
+    return value.translate(POLISH_CHAR_MAP)
 
 
 def is_trusted_domain(registered_domain: str, trusted_domains: list[str]) -> bool:
@@ -176,5 +189,5 @@ def analyze_html_crawling(url: str, trusted_domains: list[str]) -> dict:
             "score": BRAND_MARKER_SCORE,
         })
 
-    result["score"] = min(result["score"], 100)
+    result["score"] = min(result["score"], MAX_HTML_CRAWLER_SCORE)
     return result
