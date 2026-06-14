@@ -405,15 +405,15 @@ def render_technical_details(result: dict) -> None:
 
 def render_verdict_banner(result: dict, not_found_label: str = "Page not found") -> None:
     if result["verdict"] == VERDICT_DANGEROUS:
-        st.error(f"⛔ {result['verdict']} (risk: {result['score']}%)")
+        st.error(f"{result['verdict']} (risk: {result['score']}%)")
     elif result["verdict"] == VERDICT_SUSPICIOUS:
-        st.warning(f"⚠️ {result['verdict']} (risk: {result['score']}%)")
+        st.warning(f"{result['verdict']} (risk: {result['score']}%)")
     elif result["verdict"] == VERDICT_TRUSTED_BY_USER:
         st.info(f"{result['verdict']} (original risk: {result['score']}%)")
     elif result["verdict"] == VERDICT_NOT_FOUND:
         st.info(not_found_label)
     else:
-        st.success(f"✅ {result['verdict']}")
+        st.success(f"{result['verdict']}")
 
 
 def render_external_link_button(label: str, url: str, button_type: str = "primary") -> None:
@@ -824,9 +824,9 @@ def get_query_param(name: str, default: str = "") -> str:
     return value or default
 
 
-st.set_page_config(page_title="SignalShield PL", page_icon="🛡️")
+st.set_page_config(page_title="SignalShield PL")
 
-st.title("🛡️ SignalShield PL")
+st.title("SignalShield PL")
 st.subheader("Check financial scam risk before you pay")
 
 query_url = get_query_param("url")
