@@ -1,3 +1,8 @@
+import json
+import threading
+from http.server import ThreadingHTTPServer
+from urllib.request import Request, urlopen
+
 import api_server
 
 from core.analysis_cache import TtlCache
@@ -99,3 +104,53 @@ def test_analyze_links_batch_passes_shared_cache_to_each_context(monkeypatch) ->
     )
 
     assert observed_caches == [shared_cache, shared_cache, shared_cache]
+
+
+def request_json(url: str, method: str = "GET", payload: dict | None = None) -> dict:
+    data = None
+    headers = {}
+
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    request = Request(url, data=data, headers=headers, method=method)
+
+    with urlopen(request, timeout=5) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def test_api_exposes_database_lists_and_status(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("SIGNALSHIELD_DB_PATH", str(tmp_path / "api.sqlite3"))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), api_server.SignalShieldHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_address[1]}"
+
+    try:
+        created = request_json(
+            f"{base_url}/list-entry",
+            method="POST",
+            payload={
+                "list_type": "trusted",
+                "scope": "url",
+                "value": "https://api-status.example/pay",
+                "label": "test",
+            },
+        )
+        entries = request_json(f"{base_url}/list-entries")
+        status = request_json(f"{base_url}/database/status")
+        removed = request_json(
+            f"{base_url}/list-entry?id={created['entry']['id']}",
+            method="DELETE",
+        )
+        entries_after_delete = request_json(f"{base_url}/list-entries")
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+    assert created["ok"] is True
+    assert entries["entries"][0]["value"] == "https://api-status.example/pay"
+    assert status["status"]["active_entries"]["trusted"] == 1
+    assert removed == {"ok": True, "removed": True}
+    assert entries_after_delete["entries"] == []

@@ -16,6 +16,8 @@ const elements = {
   highlightNotFoundLinks: document.getElementById("highlightNotFoundLinks"),
   save: document.getElementById("save"),
   rescan: document.getElementById("rescan"),
+  trustCurrentUrl: document.getElementById("trustCurrentUrl"),
+  blockCurrentUrl: document.getElementById("blockCurrentUrl"),
   status: document.getElementById("status"),
   scanned: document.getElementById("scanned"),
   dangerous: document.getElementById("dangerous"),
@@ -28,10 +30,13 @@ const elements = {
   analysisDetail: document.getElementById("analysisDetail"),
   currentPageState: document.getElementById("currentPageState"),
   pageLabel: document.getElementById("pageLabel"),
-  pageDetail: document.getElementById("pageDetail")
+  pageDetail: document.getElementById("pageDetail"),
+  currentPageUrl: document.getElementById("currentPageUrl"),
+  databaseButtons: document.querySelector(".database-actions div")
 };
 
 let statsTimer = null;
+let latestPage = null;
 
 function setStatus(message) {
   elements.status.textContent = message;
@@ -47,6 +52,41 @@ function activeTab(callback) {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     callback(tabs[0]);
   });
+}
+
+function isHttpUrl(value) {
+  return /^https?:\/\//i.test(value || "");
+}
+
+function currentPageListState(page) {
+  const safePage = page || latestPage || {};
+
+  if (safePage.localListType === "trusted" || safePage.verdict === "trusted_by_user") {
+    return "trusted";
+  }
+
+  if (safePage.localListType === "blacklist") {
+    return "blacklist";
+  }
+
+  return "available";
+}
+
+function setDatabaseButtonsEnabled(enabled) {
+  const page = latestPage || {};
+  const displayUrl = page.url || "";
+  const hasHttpUrl = isHttpUrl(displayUrl);
+  const listState = hasHttpUrl ? currentPageListState(page) : "disabled";
+
+  elements.databaseButtons.dataset.state = listState;
+  elements.trustCurrentUrl.disabled = !enabled || !hasHttpUrl || listState === "trusted";
+  elements.blockCurrentUrl.disabled = !enabled || !hasHttpUrl || listState === "blacklist";
+}
+
+function updateCurrentPageUrl(value) {
+  const displayUrl = value || "";
+  elements.currentPageUrl.textContent = displayUrl || "No current page URL detected.";
+  setDatabaseButtonsEnabled(true);
 }
 
 function updateStats(stats) {
@@ -75,6 +115,7 @@ function updateAnalysisState(analysis) {
 
 function updateCurrentPage(page) {
   const safePage = page || {};
+  latestPage = safePage;
   const verdict = safePage.verdict || "unknown";
   const score = safePage.score || 0;
   const stage = safePage.analysisStage === "python" ? "Python" : "Quick JS";
@@ -84,6 +125,24 @@ function updateCurrentPage(page) {
   elements.currentPageState.dataset.verdict = verdict;
   elements.pageLabel.textContent = `Current page: ${verdict.toUpperCase()} (${score}%)`;
   elements.pageDetail.textContent = `${stage} analysis for ${domain}. ${reasons.slice(0, 2).join(" ")}`;
+  updateCurrentPageUrl(safePage.url || "");
+}
+
+function applyLocalListState(url, listType) {
+  const trusted = listType === "trusted";
+  updateCurrentPage({
+    ...(latestPage || {}),
+    verdict: trusted ? "trusted_by_user" : "dangerous",
+    score: trusted ? 0 : 100,
+    reasons: [
+      trusted
+        ? "Current URL is saved in your trusted list."
+        : "Current URL is saved in your blacklist."
+    ],
+    url,
+    localListType: listType,
+    analysisStage: "python"
+  });
 }
 
 function requestStats() {
@@ -115,6 +174,62 @@ function loadConfig() {
     elements.highlightNotFoundLinks.checked = Boolean(config.highlightNotFoundLinks);
     requestStats();
   });
+}
+
+function apiUrl(path, baseUrl) {
+  return new URL(path, baseUrl).href;
+}
+
+function apiBaseCandidates(baseUrl) {
+  const candidates = [baseUrl];
+
+  try {
+    const url = new URL(baseUrl);
+
+    if (url.hostname === "localhost") {
+      url.hostname = "127.0.0.1";
+      candidates.push(url.href);
+    } else if (url.hostname === "127.0.0.1") {
+      url.hostname = "localhost";
+      candidates.push(url.href);
+    }
+  } catch (_error) {
+    candidates.push(DEFAULT_CONFIG.apiBaseUrl);
+  }
+
+  return Array.from(new Set(candidates));
+}
+
+async function postListEntry(entry, apiBaseUrl) {
+  let lastError = "Local API request failed.";
+
+  for (const baseUrl of apiBaseCandidates(apiBaseUrl)) {
+    try {
+      const response = await fetch(apiUrl("/list-entry", baseUrl), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(entry)
+      });
+
+      if (!response.ok) {
+        lastError = `${baseUrl} returned HTTP ${response.status}.`;
+        continue;
+      }
+
+      const payload = await response.json();
+
+      if (!payload.ok) {
+        lastError = payload.error || `${baseUrl} returned an invalid response.`;
+        continue;
+      }
+
+      return payload.entry;
+    } catch (_error) {
+      lastError = `${baseUrl} is not reachable from the extension.`;
+    }
+  }
+
+  throw new Error(lastError);
 }
 
 function saveConfig(callback) {
@@ -165,6 +280,59 @@ function reloadActivePage() {
   });
 }
 
+function currentPageUrl(callback) {
+  if (latestPage && isHttpUrl(latestPage.url)) {
+    callback(latestPage.url);
+    return;
+  }
+
+  activeTab((tab) => {
+    callback(tab && isHttpUrl(tab.url) ? tab.url : "");
+  });
+}
+
+function addCurrentPageToList(listType) {
+  currentPageUrl(async (url) => {
+    if (!url) {
+      setStatus("Open a normal http or https page first.");
+      return;
+    }
+
+    let apiBaseUrl;
+
+    try {
+      apiBaseUrl = normalizeBaseUrl(
+        elements.apiBaseUrl.value,
+        DEFAULT_CONFIG.apiBaseUrl
+      );
+    } catch (_error) {
+      setStatus("API URL is invalid.");
+      return;
+    }
+
+    setDatabaseButtonsEnabled(false);
+    setStatus("Saving current URL to the local database...");
+
+    try {
+      const label = listType === "trusted" ? "Trusted from extension" : "Blocked from extension";
+      await postListEntry({
+        list_type: listType,
+        scope: "url",
+        value: url,
+        label,
+        note: "Added from the browser extension.",
+        expires_in: "Never"
+      }, apiBaseUrl);
+      applyLocalListState(url, listType);
+      setStatus("Saved to local database. Page reloading.");
+      reloadActivePage();
+    } catch (error) {
+      setStatus(error.message || "Cannot save to local database.");
+      setDatabaseButtonsEnabled(true);
+    }
+  });
+}
+
 function rescanPage() {
   activeTab((tab) => {
     if (!tab || !tab.id) {
@@ -188,7 +356,10 @@ function rescanPage() {
 
 elements.save.addEventListener("click", () => saveConfig(reloadActivePage));
 elements.rescan.addEventListener("click", () => saveConfig(rescanPage));
+elements.trustCurrentUrl.addEventListener("click", () => addCurrentPageToList("trusted"));
+elements.blockCurrentUrl.addEventListener("click", () => addCurrentPageToList("blacklist"));
 document.addEventListener("DOMContentLoaded", () => {
+  setDatabaseButtonsEnabled(false);
   loadConfig();
   statsTimer = window.setInterval(requestStats, 1200);
 });

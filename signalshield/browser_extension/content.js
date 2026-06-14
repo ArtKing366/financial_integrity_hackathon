@@ -143,6 +143,7 @@
       url: window.location.href,
       hostname: window.location.hostname,
       registeredDomain: "",
+      localListType: "",
       analysisStage: "quick_js",
       updatedAt: ""
     },
@@ -383,6 +384,7 @@
   function normalizeAnalysisResult(result, fallbackUrl, stage = "quick_js") {
     const safeResult = result || {};
     const details = safeResult.details || {};
+    const localMatch = details.local_list_match || {};
     const verdict = normalizeVerdict(safeResult.verdict);
     const score = Number(safeResult.score || 0);
     const reasons = Array.isArray(safeResult.reasons) ? safeResult.reasons : [];
@@ -395,6 +397,7 @@
       url: safeResult.url || details.input_url || fallbackUrl,
       hostname: safeResult.hostname || details.hostname || (parts ? parts.hostname : ""),
       registeredDomain: safeResult.registeredDomain || details.domain || (parts ? parts.registeredDomain : ""),
+      localListType: localMatch.list_type || "",
       analysisStage: stage,
       updatedAt: new Date().toLocaleTimeString()
     };
@@ -615,6 +618,7 @@
       "ssReasons",
       "ssUrl",
       "ssDomain",
+      "ssLocalListType",
       "ssVerdict",
       "ssAnalysisStage"
     ]) {
@@ -642,6 +646,7 @@
     const verdict = normalizeVerdict(result.verdict);
     const reasons = Array.isArray(result.reasons) ? result.reasons : [];
     const details = result.details || {};
+    const localMatch = details.local_list_match || {};
 
     anchor.dataset.ssAnalysisStage = stage;
     anchor.dataset.ssRawVerdict = verdict;
@@ -649,6 +654,7 @@
     anchor.dataset.ssReasons = JSON.stringify(reasons);
     anchor.dataset.ssUrl = result.url || details.input_url || anchor.href;
     anchor.dataset.ssDomain = result.registeredDomain || details.domain || "";
+    anchor.dataset.ssLocalListType = localMatch.list_type || "";
 
     if (!shouldDisplayVerdict(verdict)) {
       delete anchor.dataset.ssVerdict;
@@ -771,8 +777,12 @@
     return isHttpUrl(window.location.href) ? window.location.href : "";
   }
 
-  function formActionUrl(form) {
-    const rawAction = form.getAttribute("action") || window.location.href;
+  function formActionUrl(form, submitter = null) {
+    const rawAction = (
+      submitter
+      && typeof submitter.getAttribute === "function"
+      && submitter.getAttribute("formaction")
+    ) || form.getAttribute("action") || window.location.href;
 
     try {
       const url = new URL(rawAction, window.location.href);
@@ -790,6 +800,14 @@
 
       if (actionUrl) {
         urls.add(actionUrl);
+      }
+
+      for (const submitter of form.querySelectorAll("button[formaction], input[formaction]")) {
+        const submitterActionUrl = formActionUrl(form, submitter);
+
+        if (submitterActionUrl) {
+          urls.add(submitterActionUrl);
+        }
       }
     }
 
@@ -978,8 +996,8 @@
     ));
   }
 
-  function formActionAnalysis(form) {
-    const actionUrl = formActionUrl(form);
+  function formActionAnalysis(form, submitter = null) {
+    const actionUrl = formActionUrl(form, submitter);
 
     if (!actionUrl) {
       return null;
@@ -996,9 +1014,9 @@
     return state.formActions[actionUrl];
   }
 
-  function formWarningMessage(form) {
+  function formWarningMessage(form, submitter = null) {
     const page = state.currentPage;
-    const action = formActionAnalysis(form);
+    const action = formActionAnalysis(form, submitter);
     const pageIsRisky = RISKY_FORM_VERDICTS.has(page.verdict);
     const actionIsRisky = action && RISKY_FORM_VERDICTS.has(action.verdict);
 
@@ -1051,6 +1069,14 @@
     return lines.join("\n");
   }
 
+  function submitterFromEvent(event) {
+    if (event.submitter instanceof HTMLElement) {
+      return event.submitter;
+    }
+
+    return null;
+  }
+
   function handleFormSubmit(event) {
     const form = event.target;
 
@@ -1058,7 +1084,7 @@
       return;
     }
 
-    const warning = formWarningMessage(form);
+    const warning = formWarningMessage(form, submitterFromEvent(event));
 
     if (!warning) {
       return;

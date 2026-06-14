@@ -41,5 +41,13 @@
     "przelewy24.pl",
     "tpay.com",
     "autopay.pl"
+  ],
+  "technical": [
+    "google.com",
+    "microsoft.com",
+    "apple.com",
+    "mozilla.org",
+    "cloudflare.com",
+    "localhost"
   ]
 }

@@ -31,8 +31,11 @@ a[data-ss-verdict="not_found"] {
 }
 
 a[data-ss-verdict="trusted_by_user"] {
-  background-color: rgba(37, 99, 235, 0.15) !important;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.75) !important;
+  background-color: rgba(37, 99, 235, 0.22) !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.86) !important;
+  color: #1d4ed8 !important;
+  text-decoration-color: #1d4ed8 !important;
+  text-decoration-thickness: 2px !important;
 }
 
 #ss-link-tooltip {
