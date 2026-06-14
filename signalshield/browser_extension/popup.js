@@ -4,7 +4,9 @@ const DEFAULT_CONFIG = {
   useDeepAnalysis: true,
   openAnalyzerOnClick: true,
   highlightSafeLinks: true,
-  highlightNotFoundLinks: true
+  highlightNotFoundLinks: true,
+  trustedUrls: [],
+  blockedUrls: []
 };
 
 const elements = {
@@ -56,6 +58,19 @@ function activeTab(callback) {
 
 function isHttpUrl(value) {
   return /^https?:\/\//i.test(value || "");
+}
+
+function verdictLabel(verdict) {
+  const normalized = String(verdict || "unknown").toLowerCase();
+  const labels = {
+    dangerous: "Dangerous",
+    suspicious: "Suspicious",
+    safe: "Safe",
+    not_found: "This link does not appear to exist",
+    trusted_by_user: "Trusted by user",
+    unknown: "Unknown"
+  };
+  return labels[normalized] || normalized.replace(/_/g, " ");
 }
 
 function currentPageListState(page) {
@@ -123,7 +138,7 @@ function updateCurrentPage(page) {
   const reasons = Array.isArray(safePage.reasons) ? safePage.reasons : [];
 
   elements.currentPageState.dataset.verdict = verdict;
-  elements.pageLabel.textContent = `Current page: ${verdict.toUpperCase()} (${score}%)`;
+  elements.pageLabel.textContent = `Current page: ${verdictLabel(verdict)} (${score}%)`;
   elements.pageDetail.textContent = `${stage} analysis for ${domain}. ${reasons.slice(0, 2).join(" ")}`;
   updateCurrentPageUrl(safePage.url || "");
 }
@@ -291,6 +306,21 @@ function currentPageUrl(callback) {
   });
 }
 
+function saveLocalUrlOverride(url, listType, callback) {
+  chrome.storage.sync.get(DEFAULT_CONFIG, (config) => {
+    const trustedUrls = Array.isArray(config.trustedUrls) ? config.trustedUrls : [];
+    const blockedUrls = Array.isArray(config.blockedUrls) ? config.blockedUrls : [];
+    const targetKey = listType === "trusted" ? "trustedUrls" : "blockedUrls";
+    const oppositeKey = listType === "trusted" ? "blockedUrls" : "trustedUrls";
+    const nextConfig = {
+      [targetKey]: Array.from(new Set([...(config[targetKey] || []), url])),
+      [oppositeKey]: (config[oppositeKey] || []).filter((item) => item !== url)
+    };
+
+    chrome.storage.sync.set(nextConfig, callback);
+  });
+}
+
 function addCurrentPageToList(listType) {
   currentPageUrl(async (url) => {
     if (!url) {
@@ -314,6 +344,7 @@ function addCurrentPageToList(listType) {
     setStatus("Saving current URL to the local database...");
 
     try {
+      await new Promise((resolve) => saveLocalUrlOverride(url, listType, resolve));
       const label = listType === "trusted" ? "Trusted from extension" : "Blocked from extension";
       await postListEntry({
         list_type: listType,
@@ -327,8 +358,10 @@ function addCurrentPageToList(listType) {
       setStatus("Saved to local database. Page reloading.");
       reloadActivePage();
     } catch (error) {
-      setStatus(error.message || "Cannot save to local database.");
-      setDatabaseButtonsEnabled(true);
+      await new Promise((resolve) => saveLocalUrlOverride(url, listType, resolve));
+      applyLocalListState(url, listType);
+      setStatus("Saved in the extension. Local API database is unavailable.");
+      reloadActivePage();
     }
   });
 }

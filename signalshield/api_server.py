@@ -26,32 +26,52 @@ from core.local_db import (
     summarize_verdicts,
     sync_builtin_lists,
 )
+from core.message_analyzer import analyze_message
 from core.verdict import analyze_url, new_analysis_context
 
 MAX_BATCH_LINKS = 100
+MAX_BATCH_MESSAGES = 30
+MAX_MESSAGE_TEXT_CHARS = 6000
 MAX_BATCH_WORKERS = 6
 CLIENT_DISCONNECT_WINERRORS = {10053, 10054}
 SHARED_ANALYSIS_CACHE = TtlCache(max_entries=4096)
+PUBLIC_POST_ENDPOINTS = {"/analyze-url", "/analyze-batch", "/analyze-message", "/analyze-messages"}
+PROJECT_TOKEN_PATH = Path(__file__).resolve().parent / "data" / "api_token"
 
 
 def get_or_create_api_token() -> str:
-    """Получает существующий или генерирует новый секретный токен для API."""
+    """Return the existing local API token, or create a new one."""
     token_path = Path.home() / ".signalshield" / "api_token"
     if token_path.exists():
         return token_path.read_text().strip()
 
     token_path.parent.mkdir(parents=True, exist_ok=True)
-    token = secrets.token_hex(32)  # Генерируем безопасный 256-битный ключ
+    token = secrets.token_hex(32)
     token_path.write_text(token)
 
-    # Ограничиваем права доступа к файлу (для Linux и macOS)
     if os.name != "nt":
         token_path.chmod(0o600)
 
     return token
 
 
-# Инициализируем локальный токен при старте сервера
+_home_get_or_create_api_token = get_or_create_api_token
+
+
+def get_or_create_api_token() -> str:
+    try:
+        return _home_get_or_create_api_token()
+    except PermissionError:
+        token_path = PROJECT_TOKEN_PATH
+        if token_path.exists():
+            return token_path.read_text().strip()
+
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token = secrets.token_hex(32)
+        token_path.write_text(token)
+        return token
+
+
 API_TOKEN = get_or_create_api_token()
 
 
@@ -145,20 +165,20 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         allowed_schemes = ("chrome-extension://", "moz-extension://", "safari-web-extension://")
 
-        # Разрешаем CORS динамически только для расширений браузера
         if origin and origin.startswith(allowed_schemes):
             self.send_header("Access-Control-Allow-Origin", origin)
         else:
-            # Делфолтный безопасный fallback для локальных запросов без Origin
             self.send_header("Access-Control-Allow-Origin", "http://127.0.0.1:8766")
 
-        # Разрешаем передачу заголовка авторизации
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         super().end_headers()
 
     def is_authenticated(self) -> bool:
-        """Проверяет заголовок Authorization на соответствие секретному токену."""
+        """Check whether Authorization contains the local API bearer token."""
+        if self.command == "POST" and urlparse(self.path).path in PUBLIC_POST_ENDPOINTS:
+            return True
+
         auth_header = self.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header.split(" ", 1)[1]
@@ -172,12 +192,10 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
 
-        # Публичный и безопасный эндпоинт для проверки работоспособности
         if parsed.path == "/health":
             self.send_json({"ok": True, "service": "signalshield-api", "auth_required": False})
             return
 
-        # Защита всех остальных GET эндпоинтов
         if not self.is_authenticated():
             self.send_json({"ok": False, "error": "Unauthorized"}, status=401)
             return
@@ -215,7 +233,6 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
         self.send_json({"ok": False, "error": "Not found"}, status=404)
 
     def do_POST(self) -> None:
-        # Полный запрет любых мутаций и анализов без авторизации
         if not self.is_authenticated():
             self.send_json({"ok": False, "error": "Unauthorized"}, status=401)
             return
@@ -228,6 +245,14 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/analyze-batch":
             self.handle_analyze_batch()
+            return
+
+        if parsed.path == "/analyze-message":
+            self.handle_analyze_message()
+            return
+
+        if parsed.path == "/analyze-messages":
+            self.handle_analyze_messages()
             return
 
         if parsed.path == "/list-entry":
@@ -245,7 +270,6 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
         self.send_json({"ok": False, "error": "Not found"}, status=404)
 
     def do_DELETE(self) -> None:
-        # Защита деструктивных методов удаления/деактивации
         if not self.is_authenticated():
             self.send_json({"ok": False, "error": "Unauthorized"}, status=401)
             return
@@ -317,6 +341,72 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
                     page_url=page_url,
                     source=source,
                 )
+
+            self.send_json({
+                "ok": True,
+                "results": results,
+                "verdicts": summarize_verdicts(),
+            })
+        except Exception as error:
+            if is_client_disconnect(error):
+                return
+            self.send_json({"ok": False, "error": str(error)}, status=400)
+
+    def handle_analyze_message(self) -> None:
+        try:
+            payload = self.read_json()
+            page_url = str(payload.get("page_url", ""))
+            source = str(payload.get("source", "api_message"))
+            message = str(payload.get("message", ""))[:MAX_MESSAGE_TEXT_CHARS]
+
+            context = new_analysis_context(shared_cache=SHARED_ANALYSIS_CACHE)
+            result = analyze_message(message, context=context)
+
+            for link in result.get("links", []):
+                record_scan_event(
+                    link.get("url", ""),
+                    link.get("analysis", link),
+                    page_url=page_url,
+                    source=source,
+                )
+
+            self.send_json({"ok": True, "result": result})
+        except Exception as error:
+            if is_client_disconnect(error):
+                return
+            self.send_json({"ok": False, "error": str(error)}, status=400)
+
+    def handle_analyze_messages(self) -> None:
+        try:
+            payload = self.read_json()
+            page_url = str(payload.get("page_url", ""))
+            source = str(payload.get("source", "extension_message"))
+            messages = payload.get("messages", [])
+
+            if not isinstance(messages, list):
+                raise ValueError("messages must be a list")
+
+            context = new_analysis_context(shared_cache=SHARED_ANALYSIS_CACHE)
+            results = []
+
+            for index, item in enumerate(messages[:MAX_BATCH_MESSAGES]):
+                if isinstance(item, dict):
+                    message_id = str(item.get("id", index))
+                    text = str(item.get("text", ""))
+                else:
+                    message_id = str(index)
+                    text = str(item)
+
+                result = analyze_message(text[:MAX_MESSAGE_TEXT_CHARS], context=context)
+                results.append({"id": message_id, "result": result})
+
+                for link in result.get("links", []):
+                    record_scan_event(
+                        link.get("url", ""),
+                        link.get("analysis", link),
+                        page_url=page_url,
+                        source=source,
+                    )
 
             self.send_json({
                 "ok": True,

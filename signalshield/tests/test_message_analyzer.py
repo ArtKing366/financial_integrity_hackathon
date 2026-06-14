@@ -1,6 +1,7 @@
 from core import message_analyzer
 from core.message_analyzer import (
     VERDICT_DANGEROUS,
+    VERDICT_NOT_FOUND,
     VERDICT_SAFE,
     VERDICT_SUSPICIOUS,
     analyze_message,
@@ -119,3 +120,42 @@ def test_plain_message_without_links_is_safe() -> None:
 
     assert result["verdict"] == VERDICT_SAFE
     assert result["score"] == 0
+
+
+def test_analyze_message_reports_not_found_links(monkeypatch) -> None:
+    def fake_analyze_url(url: str, context=None) -> dict:
+        return {
+            "verdict": VERDICT_NOT_FOUND,
+            "score": 0,
+            "reasons": ["The page or domain does not appear to exist."],
+            "details": {"input_url": url},
+        }
+
+    monkeypatch.setattr(message_analyzer, "analyze_url", fake_analyze_url)
+
+    result = analyze_message("Pilne: sprawdz status na https://missing-example.invalid/pay")
+
+    assert result["details"]["not_found_link_count"] == 1
+    assert any("does not appear to exist" in reason for reason in result["reasons"])
+
+
+def test_analyze_email_authenticity_flags_failed_auth_and_domain_mismatch() -> None:
+    result = analyze_message(
+        "\n".join([
+            "From: Bank Security <alerts@trusted-bank.pl>",
+            "Reply-To: Support <case@evil-example.pl>",
+            "Return-Path: <bounce@evil-example.pl>",
+            "Authentication-Results: mx.example; spf=fail smtp.mailfrom=evil-example.pl; dkim=pass; dmarc=fail",
+            "Subject: Verify account",
+            "",
+            "Please verify your account payment at https://evil-example.pl/login",
+        ])
+    )
+
+    email_auth = result["email_authenticity"]
+
+    assert result["verdict"] in {VERDICT_DANGEROUS, VERDICT_SUSPICIOUS}
+    assert email_auth["score"] > 0
+    assert "spf_failed" in {rule["id"] for rule in email_auth["matched_rules"]}
+    assert "dmarc_failed" in {rule["id"] for rule in email_auth["matched_rules"]}
+    assert "reply-to_domain_mismatch" in {rule["id"] for rule in email_auth["matched_rules"]}

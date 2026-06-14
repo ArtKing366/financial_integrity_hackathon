@@ -35,7 +35,7 @@ signalshield/
 `-- README.md
 ```
 
-Independent check modules feed a single `analyze_url()` API for links and `analyze_message()` for full SMS/email/chat text. The same APIs can power the Streamlit UI today and a browser extension tomorrow.
+Independent check modules feed `analyze_url()` for links and `analyze_message()` for full SMS/email/chat text. The browser extension uses link and form analysis only; full-message analysis stays in the Streamlit UI and local API.
 
 ## Pipeline
 

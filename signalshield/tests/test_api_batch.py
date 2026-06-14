@@ -106,13 +106,21 @@ def test_analyze_links_batch_passes_shared_cache_to_each_context(monkeypatch) ->
     assert observed_caches == [shared_cache, shared_cache, shared_cache]
 
 
-def request_json(url: str, method: str = "GET", payload: dict | None = None) -> dict:
+def request_json(
+    url: str,
+    method: str = "GET",
+    payload: dict | None = None,
+    authenticated: bool = False,
+) -> dict:
     data = None
     headers = {}
 
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
+
+    if authenticated:
+        headers["Authorization"] = f"Bearer {api_server.API_TOKEN}"
 
     request = Request(url, data=data, headers=headers, method=method)
 
@@ -131,6 +139,7 @@ def test_api_exposes_database_lists_and_status(tmp_path, monkeypatch) -> None:
         created = request_json(
             f"{base_url}/list-entry",
             method="POST",
+            authenticated=True,
             payload={
                 "list_type": "trusted",
                 "scope": "url",
@@ -138,13 +147,14 @@ def test_api_exposes_database_lists_and_status(tmp_path, monkeypatch) -> None:
                 "label": "test",
             },
         )
-        entries = request_json(f"{base_url}/list-entries")
-        status = request_json(f"{base_url}/database/status")
+        entries = request_json(f"{base_url}/list-entries", authenticated=True)
+        status = request_json(f"{base_url}/database/status", authenticated=True)
         removed = request_json(
             f"{base_url}/list-entry?id={created['entry']['id']}",
             method="DELETE",
+            authenticated=True,
         )
-        entries_after_delete = request_json(f"{base_url}/list-entries")
+        entries_after_delete = request_json(f"{base_url}/list-entries", authenticated=True)
     finally:
         server.shutdown()
         thread.join(timeout=5)
@@ -154,3 +164,40 @@ def test_api_exposes_database_lists_and_status(tmp_path, monkeypatch) -> None:
     assert status["status"]["active_entries"]["trusted"] == 1
     assert removed == {"ok": True, "removed": True}
     assert entries_after_delete["entries"] == []
+
+
+def test_api_analyze_messages_is_public_and_returns_message_results(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("SIGNALSHIELD_DB_PATH", str(tmp_path / "api.sqlite3"))
+
+    def fake_analyze_message(message: str, context=None) -> dict:
+        return {
+            "verdict": "SUSPICIOUS",
+            "score": 25,
+            "reasons": [f"checked: {message[:8]}"],
+            "links": [],
+            "details": {"link_count": 0},
+        }
+
+    monkeypatch.setattr(api_server, "analyze_message", fake_analyze_message)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), api_server.SignalShieldHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_address[1]}"
+
+    try:
+        response = request_json(
+            f"{base_url}/analyze-messages",
+            method="POST",
+            payload={
+                "page_url": "https://mail.example/inbox",
+                "messages": [{"id": "one", "text": "Pilne: payment check"}],
+            },
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+    assert response["ok"] is True
+    assert response["results"][0]["id"] == "one"
+    assert response["results"][0]["result"]["verdict"] == "SUSPICIOUS"
