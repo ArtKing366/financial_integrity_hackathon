@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import secrets
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from core.analysis_cache import TtlCache
+from core.domain_utils import extract_registered_domain, normalize_url
 from core.local_db import (
     add_list_entry,
     database_status,
@@ -18,18 +22,37 @@ from core.local_db import (
     list_entries,
     recent_scan_events,
     record_scan_event,
-    sync_builtin_lists,
     summarize_page_domains,
     summarize_verdicts,
+    sync_builtin_lists,
 )
-from core.domain_utils import extract_registered_domain, normalize_url
 from core.verdict import analyze_url, new_analysis_context
-
 
 MAX_BATCH_LINKS = 100
 MAX_BATCH_WORKERS = 6
 CLIENT_DISCONNECT_WINERRORS = {10053, 10054}
 SHARED_ANALYSIS_CACHE = TtlCache(max_entries=4096)
+
+
+def get_or_create_api_token() -> str:
+    """Получает существующий или генерирует новый секретный токен для API."""
+    token_path = Path.home() / ".signalshield" / "api_token"
+    if token_path.exists():
+        return token_path.read_text().strip()
+
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token = secrets.token_hex(32)  # Генерируем безопасный 256-битный ключ
+    token_path.write_text(token)
+
+    # Ограничиваем права доступа к файлу (для Linux и macOS)
+    if os.name != "nt":
+        token_path.chmod(0o600)
+
+    return token
+
+
+# Инициализируем локальный токен при старте сервера
+API_TOKEN = get_or_create_api_token()
 
 
 def json_bytes(payload: Any) -> bytes:
@@ -116,13 +139,31 @@ def analyze_links_batch(
 
 
 class SignalShieldHandler(BaseHTTPRequestHandler):
-    server_version = "SignalShieldAPI/0.1"
+    server_version = "SignalShieldAPI/0.2"
 
     def end_headers(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        origin = self.headers.get("Origin")
+        allowed_schemes = ("chrome-extension://", "moz-extension://", "safari-web-extension://")
+
+        # Разрешаем CORS динамически только для расширений браузера
+        if origin and origin.startswith(allowed_schemes):
+            self.send_header("Access-Control-Allow-Origin", origin)
+        else:
+            # Делфолтный безопасный fallback для локальных запросов без Origin
+            self.send_header("Access-Control-Allow-Origin", "http://127.0.0.1:8766")
+
+        # Разрешаем передачу заголовка авторизации
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         super().end_headers()
+
+    def is_authenticated(self) -> bool:
+        """Проверяет заголовок Authorization на соответствие секретному токену."""
+        auth_header = self.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
+            return secrets.compare_digest(token, API_TOKEN)
+        return False
 
     def do_OPTIONS(self) -> None:
         self.send_response(204)
@@ -131,8 +172,14 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
 
+        # Публичный и безопасный эндпоинт для проверки работоспособности
         if parsed.path == "/health":
-            self.send_json({"ok": True, "service": "signalshield-api"})
+            self.send_json({"ok": True, "service": "signalshield-api", "auth_required": False})
+            return
+
+        # Защита всех остальных GET эндпоинтов
+        if not self.is_authenticated():
+            self.send_json({"ok": False, "error": "Unauthorized"}, status=401)
             return
 
         if parsed.path == "/analytics":
@@ -168,6 +215,11 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
         self.send_json({"ok": False, "error": "Not found"}, status=404)
 
     def do_POST(self) -> None:
+        # Полный запрет любых мутаций и анализов без авторизации
+        if not self.is_authenticated():
+            self.send_json({"ok": False, "error": "Unauthorized"}, status=401)
+            return
+
         parsed = urlparse(self.path)
 
         if parsed.path == "/analyze-url":
@@ -193,6 +245,11 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
         self.send_json({"ok": False, "error": "Not found"}, status=404)
 
     def do_DELETE(self) -> None:
+        # Защита деструктивных методов удаления/деактивации
+        if not self.is_authenticated():
+            self.send_json({"ok": False, "error": "Unauthorized"}, status=401)
+            return
+
         parsed = urlparse(self.path)
 
         if parsed.path == "/list-entry":
@@ -337,7 +394,12 @@ def main() -> None:
 
     sync_builtin_lists()
     server = ThreadingHTTPServer((args.host, args.port), SignalShieldHandler)
+    
     print(f"SignalShield API listening on http://{args.host}:{args.port}")
+    print("API Security Status: ENABLED")
+    print(f"  Token File: {Path.home() / '.signalshield' / 'api_token'}")
+    print(f"  Current Authorization Header: Bearer {API_TOKEN}")
+    
     server.serve_forever()
 
 
