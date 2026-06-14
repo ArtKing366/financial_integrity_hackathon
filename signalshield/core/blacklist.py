@@ -13,6 +13,8 @@ except Exception:
 BLACKLIST_URL = "https://hole.cert.pl/domains/domains.txt"
 CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "cert_blacklist.csv"
 CACHE_MAX_AGE_HOURS = 6
+_BLACKLIST_MEMORY_CACHE: set[str] | None = None
+_BLACKLIST_MEMORY_CACHE_TIME: datetime | None = None
 
 # FIX: _BLACKLIST_MEMORY_CACHE was not thread-safe.
 # Two separate assignments (_BLACKLIST_MEMORY_CACHE = ... then
