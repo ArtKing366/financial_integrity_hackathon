@@ -10,56 +10,10 @@
     highlightNotFoundLinks: true
   };
 
-  const TRUSTED_DOMAINS = [
-    "mbank.pl",
-    "pko-bp.pl",
-    "santander.pl",
-    "ing.pl",
-    "millennium.pl",
-    "bankmillennium.pl",
-    "pekao.com.pl",
-    "aliorbank.pl",
-    "nestbank.pl",
-    "bnpparibas.pl",
-    "citibank.pl",
-    "velobank.pl",
-    "credit-agricole.pl",
-    "bosbank.pl",
-    "pocztowy.pl",
-    "toyotabank.pl",
-    "bankbps.pl",
-    "sgb.pl",
-    "allegro.pl",
-    "olx.pl",
-    "vinted.pl",
-    "empik.com",
-    "mediaexpert.pl",
-    "x-kom.pl",
-    "morele.net",
-    "ceneo.pl",
-    "inpost.pl",
-    "dpd.com.pl",
-    "dhl.com",
-    "poczta-polska.pl",
-    "blik.com",
-    "payu.com",
-    "przelewy24.pl",
-    "tpay.com",
-    "autopay.pl"
-  ];
-
-  const FALLBACK_BLACKLIST = new Set([
-    "allegro-platnosc24.pl",
-    "allegro-platnosc.pl",
-    "mbank-logowanie.com",
-    "mbank-login24.pl",
-    "mbank-secure.pl",
-    "pko-bp-login.pl",
-    "ing-bank.pl",
-    "olx-payment.pl",
-    "inpost-delivery.pl",
-    "vinted-pay.pl"
-  ]);
+  const EMPTY_QUICK_RULES = {
+    trusted_domains: [],
+    fallback_blacklist: []
+  };
 
   const PATH_KEYWORDS = [
     "blik",
@@ -119,6 +73,8 @@
 
   const state = {
     config: { ...DEFAULT_CONFIG },
+    quickRules: { ...EMPTY_QUICK_RULES },
+    rulesLoaded: false,
     stats: {
       scanned: 0,
       dangerous: 0,
@@ -222,14 +178,39 @@
     }
   }
 
+  function normalizeQuickRules(payload) {
+    const safePayload = payload || {};
+    const trustedDomains = Array.isArray(safePayload.trusted_domains)
+      ? safePayload.trusted_domains
+      : [];
+    const fallbackBlacklist = Array.isArray(safePayload.fallback_blacklist)
+      ? safePayload.fallback_blacklist
+      : [];
+
+    return {
+      version: Number(safePayload.version || 0),
+      generated_at: String(safePayload.generated_at || ""),
+      trusted_domains: trustedDomains
+        .map((domain) => String(domain || "").toLowerCase().trim())
+        .filter(Boolean),
+      fallback_blacklist: fallbackBlacklist
+        .map((domain) => String(domain || "").toLowerCase().trim())
+        .filter(Boolean)
+    };
+  }
+
   function trustedSet() {
-    return new Set(TRUSTED_DOMAINS.map((domain) => domain.toLowerCase()));
+    return new Set(state.quickRules.trusted_domains);
+  }
+
+  function fallbackBlacklistSet() {
+    return new Set(state.quickRules.fallback_blacklist);
   }
 
   function brandTokens() {
     const tokens = new Set();
 
-    for (const trusted of TRUSTED_DOMAINS) {
+    for (const trusted of state.quickRules.trusted_domains) {
       const parts = splitDomain(trusted);
       if (parts.registeredDomain) {
         tokens.add(parts.registeredDomain);
@@ -283,7 +264,7 @@
       reasons.push(reason);
     }
 
-    if (FALLBACK_BLACKLIST.has(parts.registeredDomain)) {
+    if (fallbackBlacklistSet().has(parts.registeredDomain)) {
       add(100, "Domain is on the demo phishing blacklist.");
     }
 
@@ -1128,15 +1109,54 @@
       .replace(/'/g, "&#039;");
   }
 
+  async function loadQuickRules() {
+    let rules = normalizeQuickRules(EMPTY_QUICK_RULES);
+
+    try {
+      const bundledResponse = await fetch(chrome.runtime.getURL("rules.json"));
+
+      if (bundledResponse.ok) {
+        rules = normalizeQuickRules(await bundledResponse.json());
+      }
+    } catch (_error) {
+      // Bundled rules.json is the offline fallback.
+    }
+
+    for (const baseUrl of apiBaseCandidates()) {
+      try {
+        const response = await fetch(apiUrl("/quick-rules", baseUrl), {
+          method: "GET",
+          cache: "no-store"
+        });
+
+        if (!response.ok) {
+          continue;
+        }
+
+        const payload = await response.json();
+
+        if (payload.ok && payload.rules) {
+          rules = normalizeQuickRules(payload.rules);
+          break;
+        }
+      } catch (_error) {
+        continue;
+      }
+    }
+
+    state.quickRules = rules;
+    state.rulesLoaded = true;
+  }
+
   function loadConfig(callback) {
     if (!chrome.storage || !chrome.storage.sync) {
-      callback();
+      loadQuickRules().finally(callback);
       return;
     }
 
     chrome.storage.sync.get(DEFAULT_CONFIG, (config) => {
       state.config = { ...DEFAULT_CONFIG, ...config };
-      callback();
+      loadQuickRules().finally(callback);
     });
   }
 
