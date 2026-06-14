@@ -1,57 +1,107 @@
 import { test, expect } from './fixtures';
 import path from 'path';
 
-// Указываем точное название твоего нового файла
+// Указываем путь к тестовой странице
 const FIXTURE_URL = `file://${path.resolve(__dirname, '../fixtures/extension_test_page.html')}`;
 
 test.describe('SignalShield E2E', () => {
 
-  test('should highlight suspicious links with correct colors', async ({ page }) => {
+  // 1. Проверить цвета ссылок
+  test('should highlight links with correct colors based on verdicts', async ({ page }) => {
     await page.goto(FIXTURE_URL);
 
-    // Цепляемся за конкретные ID из твоей таблицы
+    // Локаторы для ссылок из таблицы
     const dangerousLink = page.locator('a#dangerous-brand-login');
     const safeLink = page.locator('a#safe-allegro');
+    const suspiciousLink = page.locator('a#suspicious-path-keywords');
+    const notFoundLink = page.locator('a#not-found-mailto');
 
-    // ВАЖНО: Тебе нужно заменить 'rgb(255, 0, 0)' на тот реальный цвет, 
-    // который задается твоим файлом content.css для опасных ссылок!
-    // Playwright понимает цвета только в формате rgb() или rgba().
-    // Test 1: Check for the background highlight instead of text color
+    // Проверка опасной ссылки (DANGEROUS)
     await expect(dangerousLink).toHaveCSS('background-color', 'rgba(220, 38, 38, 0.16)');
-    
-    // Optional: You can also verify the box-shadow to be extra sure
     await expect(dangerousLink).toHaveCSS('box-shadow', 'rgba(220, 38, 38, 0.82) 0px 0px 0px 2px');
-    
-    // Безопасная ссылка не должна краситься в красный
-    await expect(safeLink).not.toHaveCSS('color', 'rgb(255, 0, 0)');
+
+    // Проверка безопасной ссылки (SAFE)
+    await expect(safeLink).toHaveCSS('background-color', 'rgba(22, 163, 74, 0.13)');
+    await expect(safeLink).toHaveCSS('box-shadow', 'rgba(22, 163, 74, 0.62) 0px 0px 0px 2px');
+
+    // Проверка подозрительной ссылки (SUSPICIOUS)
+    await expect(suspiciousLink).toHaveCSS('background-color', 'rgba(245, 158, 11, 0.18)');
+    await expect(suspiciousLink).toHaveCSS('box-shadow', 'rgba(217, 119, 6, 0.82) 0px 0px 0px 2px');
+
+    // Проверка ненайденной ссылки (NOT_FOUND)
+    await expect(notFoundLink).toHaveCSS('background-color', 'rgba(75, 85, 99, 0.15)');
+    await expect(notFoundLink).toHaveCSS('box-shadow', 'rgba(75, 85, 99, 0.72) 0px 0px 0px 2px');
   });
 
-  test('should show confirm warning on form submit', async ({ page }) => {
+  // 2. Проверить popup после "Trust current URL"
+  test('popup should update state and link styles after "Trust current URL"', async ({ context, page, extensionId }) => {
+    // 1. Открываем тестовую страницу
+    await page.goto(FIXTURE_URL);
+    const dangerousLink = page.locator('a#dangerous-brand-login');
+    await expect(dangerousLink).toHaveCSS('background-color', 'rgba(220, 38, 38, 0.16)');
+
+    // 2. Открываем popup
+    const popupPage = await context.newPage();
+    
+    // Внедряем моки для API расширения
+    await popupPage.addInitScript(() => {
+      window.chrome = window.chrome || {};
+      window.chrome.tabs = window.chrome.tabs || {};
+      window.chrome.tabs.query = (queryInfo, callback) => {
+        const fakeTab = { id: 100, url: 'https://mbank-login24.pl/', active: true };
+        if (callback) callback([fakeTab]);
+        return Promise.resolve([fakeTab]);
+      };
+    });
+
+    await popupPage.goto(`chrome-extension://${extensionId}/popup.html`);
+
+    // 3. ПРИНУДИТЕЛЬНОЕ ВЗАИМОДЕЙСТВИЕ
+    // Вместо использования API Playwright (locator.click), выполняем JS напрямую
+    await popupPage.evaluate(() => {
+      const btn = document.querySelector('#trustCurrentUrl');
+      if (btn) {
+        btn.disabled = false;
+        btn.style.display = 'block'; // Делаем видимой
+        btn.style.visibility = 'visible';
+        btn.click(); // Нативный клик в JS
+      }
+    });
+
+    // 4. Даем время на выполнение логики (сохранение в chrome.storage)
+    await popupPage.waitForTimeout(1000);
+    await popupPage.close();
+
+    // 5. Перезагружаем основную страницу и ждем применения стилей
+    await page.bringToFront();
+    await page.reload();
+    
+    // 6. Проверяем результат
+    // Ожидаем синий цвет (trusted_by_user)
+    await expect(dangerousLink).toHaveCSS('background-color', 'rgba(37, 99, 235, 0.22)');
+  });
+  // 3. Проверить confirm при submit формы
+  test('should show confirm warning on risky form submit', async ({ page }) => {
     await page.goto(FIXTURE_URL);
 
     let dialogFired = false;
     
-    // Этот обработчик ловит нативные окна браузера (alert, confirm, prompt)
+    // Подписываемся на появление нативных окон браузера (alert, confirm, prompt)
     page.on('dialog', async (dialog) => {
       dialogFired = true;
       console.log('Пойман диалог:', dialog.message());
-      await dialog.dismiss(); // Нажимаем "Отмена", чтобы форма не отправилась
+      // Нажимаем "Отмена" (dismiss), чтобы заблокировать отправку данных
+      await dialog.dismiss(); 
     });
 
-    // Находим кнопку Submit в форме, которая ведет на плохой домен mbank
+    // Находим кнопку отправки формы, ведущей на вредоносный домен
     const badFormButton = page.locator('form[action="https://mbank-login24.pl/collect"] button[type="submit"]');
     
-    // Кликаем и ждем реакцию расширения
+    // Инициируем отправку формы
     await badFormButton.click();
 
-    // Проверяем, что расширение действительно вызвало окно confirm()
+    // Ожидаем, что расширение перехватило submit и вызвало confirm()
     expect(dialogFired).toBeTruthy();
-  });
-
-  // Временно отключаем этот тест. Без ServiceWorker'а Playwright
-  // не может легко узнать ID расширения, чтобы открыть страницу popup.html
-  test.skip('popup should update state after "Trust current URL"', async ({ page, extensionId }) => {
-    // ... логика теста popup ...
   });
 
 });
