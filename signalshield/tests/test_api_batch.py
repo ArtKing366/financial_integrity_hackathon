@@ -154,3 +154,22 @@ def test_api_exposes_database_lists_and_status(tmp_path, monkeypatch) -> None:
     assert status["status"]["active_entries"]["trusted"] == 1
     assert removed == {"ok": True, "removed": True}
     assert entries_after_delete["entries"] == []
+
+
+def test_api_exposes_public_quick_rules(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("SIGNALSHIELD_DB_PATH", str(tmp_path / "quick-rules.sqlite3"))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), api_server.SignalShieldHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_address[1]}"
+
+    try:
+        payload = request_json(f"{base_url}/quick-rules")
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+    assert payload["ok"] is True
+    assert payload["auth_required"] is False
+    assert "mbank.pl" in payload["rules"]["trusted_domains"]
+    assert "mbank-login24.pl" in payload["rules"]["fallback_blacklist"]

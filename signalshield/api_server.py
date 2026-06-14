@@ -26,6 +26,7 @@ from core.local_db import (
     summarize_verdicts,
     sync_builtin_lists,
 )
+from core.extension_rules import build_quick_rules_config
 from core.verdict import analyze_url, new_analysis_context
 
 MAX_BATCH_LINKS = 100
@@ -175,6 +176,15 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
         # Публичный и безопасный эндпоинт для проверки работоспособности
         if parsed.path == "/health":
             self.send_json({"ok": True, "service": "signalshield-api", "auth_required": False})
+            return
+
+        # Публичный read-only конфиг для quick-check расширения (только домены из data/)
+        if parsed.path == "/quick-rules":
+            self.send_json({
+                "ok": True,
+                "rules": build_quick_rules_config(),
+                "auth_required": False,
+            })
             return
 
         # Защита всех остальных GET эндпоинтов
