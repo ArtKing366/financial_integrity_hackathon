@@ -1,25 +1,27 @@
 import { test as base, chromium } from '@playwright/test';
 import path from 'path';
 
-const extensionPath = path.join(__dirname, '../browser_extension'); 
+// Path to the unpacked extension folder with manifest.json.
+const extensionPath = path.join(__dirname, '../browser_extension');
 
 export const test = base.extend({
   context: async ({}, use) => {
+    // Extensions require a persistent browser context.
     const context = await chromium.launchPersistentContext('', {
-      headless: false, 
+      headless: false,
       args: [
         `--disable-extensions-except=${extensionPath}`,
         `--load-extension=${extensionPath}`,
       ],
     });
-    
+
     await use(context);
     await context.close();
   },
-  
+
   extensionId: async ({ context }, use) => {
     let background = context.serviceWorkers()[0] || context.backgroundPages()[0];
-    
+
     if (!background) {
       // Keep extension-id discovery fast when no service worker is active.
       const timeoutFallback = new Promise(resolve => setTimeout(() => resolve(null), 1500));
@@ -45,6 +47,7 @@ export const test = base.extend({
       await page.close();
     }
 
+    const extensionId = background.url().split('/')[2];
     await use(extensionId);
   },
 });

@@ -223,6 +223,8 @@
   const RISKY_FORM_VERDICTS = new Set(["dangerous", "suspicious"]);
   const state = {
     config: { ...DEFAULT_CONFIG },
+    quickRules: { ...EMPTY_QUICK_RULES },
+    rulesLoaded: false,
     stats: {
       scanned: 0,
       dangerous: 0,
@@ -258,6 +260,19 @@
     lastDeepSignature: ""
   };
 
+  const POLISH_DIACRITICS = /[\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017c\u017a]/g;
+  const POLISH_CHAR_MAP = {
+    "\u0105": "a",
+    "\u0107": "c",
+    "\u0119": "e",
+    "\u0142": "l",
+    "\u0144": "n",
+    "\u00f3": "o",
+    "\u015b": "s",
+    "\u017c": "z",
+    "\u017a": "z"
+  };
+
   function normalizeText(value) {
     return decodeURIComponentSafe(value)
       .toLowerCase()
@@ -274,17 +289,7 @@
         "\u017a": "z"
       }[char] || char))
       .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[ąćęłńóśżź]/g, (char) => ({
-        "ą": "a",
-        "ć": "c",
-        "ę": "e",
-        "ł": "l",
-        "ń": "n",
-        "ó": "o",
-        "ś": "s",
-        "ż": "z",
-        "ź": "z"
-      }[char] || char));
+      .replace(POLISH_DIACRITICS, (char) => POLISH_CHAR_MAP[char] || char);
   }
 
   function decodeURIComponentSafe(value) {
@@ -337,8 +342,33 @@
     }
   }
 
+  function normalizeQuickRules(payload) {
+    const safePayload = payload || {};
+    const trustedDomains = Array.isArray(safePayload.trusted_domains)
+      ? safePayload.trusted_domains
+      : [];
+    const fallbackBlacklist = Array.isArray(safePayload.fallback_blacklist)
+      ? safePayload.fallback_blacklist
+      : [];
+
+    return {
+      version: Number(safePayload.version || 0),
+      generated_at: String(safePayload.generated_at || ""),
+      trusted_domains: trustedDomains
+        .map((domain) => String(domain || "").toLowerCase().trim())
+        .filter(Boolean),
+      fallback_blacklist: fallbackBlacklist
+        .map((domain) => String(domain || "").toLowerCase().trim())
+        .filter(Boolean)
+    };
+  }
+
   function trustedSet() {
-    return new Set(TRUSTED_DOMAINS.map((domain) => domain.toLowerCase()));
+    return new Set(state.quickRules.trusted_domains);
+  }
+
+  function fallbackBlacklistSet() {
+    return new Set(state.quickRules.fallback_blacklist);
   }
 
   function extensionListSet(key) {
@@ -366,7 +396,7 @@
   function brandTokens() {
     const tokens = new Set();
 
-    for (const trusted of TRUSTED_DOMAINS) {
+    for (const trusted of state.quickRules.trusted_domains) {
       const parts = splitDomain(trusted);
       if (parts.registeredDomain) {
         tokens.add(parts.registeredDomain);
@@ -1312,15 +1342,54 @@
       .replace(/'/g, "&#039;");
   }
 
+  async function loadQuickRules() {
+    let rules = normalizeQuickRules(EMPTY_QUICK_RULES);
+
+    try {
+      const bundledResponse = await fetch(chrome.runtime.getURL("rules.json"));
+
+      if (bundledResponse.ok) {
+        rules = normalizeQuickRules(await bundledResponse.json());
+      }
+    } catch (_error) {
+      // Bundled rules.json is the offline fallback.
+    }
+
+    for (const baseUrl of apiBaseCandidates()) {
+      try {
+        const response = await fetch(apiUrl("/quick-rules", baseUrl), {
+          method: "GET",
+          cache: "no-store"
+        });
+
+        if (!response.ok) {
+          continue;
+        }
+
+        const payload = await response.json();
+
+        if (payload.ok && payload.rules) {
+          rules = normalizeQuickRules(payload.rules);
+          break;
+        }
+      } catch (_error) {
+        continue;
+      }
+    }
+
+    state.quickRules = rules;
+    state.rulesLoaded = true;
+  }
+
   function loadConfig(callback) {
     if (!chrome.storage || !chrome.storage.sync) {
-      callback();
+      loadQuickRules().finally(callback);
       return;
     }
 
     chrome.storage.sync.get(DEFAULT_CONFIG, (config) => {
       state.config = { ...DEFAULT_CONFIG, ...config };
-      callback();
+      loadQuickRules().finally(callback);
     });
   }
 

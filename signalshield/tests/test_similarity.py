@@ -2,7 +2,7 @@ from core.similarity import check_similarity, load_trusted_brands, normalize_dom
 
 
 def test_normalize_domain_strips_diacritics() -> None:
-    assert normalize_domain("allėgro.pl") == "allegro.pl"
+    assert normalize_domain("all\u0117gro.pl") == "allegro.pl"
 
 
 def test_exact_trusted_domain_is_not_flagged() -> None:
@@ -33,7 +33,7 @@ def test_google_digit_substitution_is_detected() -> None:
 
 
 def test_homograph_attack_is_detected() -> None:
-    results = check_similarity("allėgro.pl", load_trusted_brands())
+    results = check_similarity("all\u0117gro.pl", load_trusted_brands())
     assert results
     assert results[0][0] == "allegro.pl"
     assert results[0][1] == 1.0
