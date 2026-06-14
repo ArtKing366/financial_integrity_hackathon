@@ -5,3 +5,5 @@ requests
 tldextract
 validators
 pytest
+beautifulsoup4
+dnspython

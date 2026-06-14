@@ -1,0 +1,121 @@
+from core import message_analyzer
+from core.message_analyzer import (
+    VERDICT_DANGEROUS,
+    VERDICT_SAFE,
+    VERDICT_SUSPICIOUS,
+    analyze_message,
+    characterize_link,
+    extract_links,
+)
+
+
+def test_extract_links_finds_full_www_and_bare_urls() -> None:
+    links = extract_links(
+        "Pay at https://evil.example/pay, then check www.bank.pl and mbank-login24.pl."
+    )
+
+    urls = [link["url"] for link in links]
+
+    assert "https://evil.example/pay" in urls
+    assert "https://www.bank.pl" in urls
+    assert "https://mbank-login24.pl" in urls
+
+
+def test_characterize_link_flags_shortener_and_suspicious_tld() -> None:
+    result = characterize_link("http://bit.ly/pay")
+
+    assert result["score"] >= 20
+    assert result["is_shortener"] is True
+    assert result["uses_https"] is False
+
+
+def test_analyze_message_combines_text_and_link_risk(monkeypatch) -> None:
+    def fake_analyze_url(url: str, context=None) -> dict:
+        return {
+            "verdict": VERDICT_SUSPICIOUS,
+            "score": 30,
+            "reasons": ["Fake link risk."],
+            "details": {"input_url": url, "domain": "evil.example"},
+        }
+
+    monkeypatch.setattr(message_analyzer, "analyze_url", fake_analyze_url)
+
+    result = analyze_message("Pilne: dopłata do paczki https://evil.example/pay kod BLIK")
+
+    assert result["verdict"] == VERDICT_DANGEROUS
+    assert result["links"][0]["score"] == 30
+    assert result["message_signals"]["score"] >= 20
+
+
+def test_analyze_message_reuses_one_context_for_all_links(monkeypatch) -> None:
+    contexts = []
+
+    def fake_context() -> dict:
+        return {"marker": object()}
+
+    def fake_analyze_url(url: str, context=None) -> dict:
+        contexts.append(context)
+        return {
+            "verdict": VERDICT_SAFE,
+            "score": 0,
+            "reasons": [],
+            "details": {"input_url": url},
+        }
+
+    monkeypatch.setattr(message_analyzer, "new_analysis_context", fake_context)
+    monkeypatch.setattr(message_analyzer, "analyze_url", fake_analyze_url)
+
+    result = analyze_message(
+        "Check https://first-example.pl/pay and https://second-example.pl/login"
+    )
+
+    assert result["details"]["link_count"] == 2
+    assert len(contexts) == 2
+    assert contexts[0] is contexts[1]
+    assert contexts[0] is not None
+
+
+def test_message_without_links_can_still_be_suspicious() -> None:
+    result = analyze_message(
+        "Pracownik banku prosi o kod SMS i instalację AnyDesk do weryfikacji."
+    )
+
+    assert result["verdict"] == VERDICT_DANGEROUS
+    assert result["details"]["link_count"] == 0
+
+
+def test_market_buy_signal_without_links_is_suspicious() -> None:
+    result = analyze_message("Kup teraz akcje $ABC, wejscie na pozycje.")
+
+    assert result["verdict"] == VERDICT_SUSPICIOUS
+    assert result["score"] >= 35
+    assert result["details"]["link_count"] == 0
+    assert result["market_manipulation"]["status"] == "SUSPICIOUS"
+    assert "investment_call_to_action" in result["market_manipulation"]["matched_rules"]
+
+
+def test_market_pump_without_links_can_be_dangerous() -> None:
+    result = analyze_message(
+        "Kup teraz crypto 100x profit, ostatnia szansa, to the moon."
+    )
+
+    assert result["verdict"] == VERDICT_DANGEROUS
+    assert result["score"] >= 70
+    assert result["details"]["link_count"] == 0
+    assert result["market_manipulation"]["status"] == "MARKET_MANIPULATION_RISK"
+
+
+def test_plain_market_context_without_links_stays_safe() -> None:
+    result = analyze_message("Czy warto obserwowac crypto w tym roku?")
+
+    assert result["verdict"] == VERDICT_SAFE
+    assert result["score"] < 20
+    assert result["details"]["link_count"] == 0
+    assert result["market_manipulation"]["matched_rules"] == ["trading_context"]
+
+
+def test_plain_message_without_links_is_safe() -> None:
+    result = analyze_message("Dzień dobry, potwierdzam spotkanie jutro o 10.")
+
+    assert result["verdict"] == VERDICT_SAFE
+    assert result["score"] == 0

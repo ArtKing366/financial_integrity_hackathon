@@ -1,0 +1,183 @@
+body {
+  width: 380px;
+  margin: 0;
+  background: #f8fafc;
+  color: #111827;
+  font: 13px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+main {
+  padding: 14px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 18px;
+}
+
+p {
+  margin: 4px 0 12px;
+  color: #4b5563;
+}
+
+label {
+  display: block;
+  margin-top: 12px;
+  font-weight: 600;
+}
+
+input[type="url"] {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 5px;
+  padding: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-weight: 500;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.stats div {
+  padding: 8px 6px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  text-align: center;
+}
+
+.stats strong {
+  display: block;
+  font-size: 17px;
+}
+
+.stats span {
+  font-size: 10px;
+  color: #6b7280;
+}
+
+.danger strong {
+  color: #dc2626;
+}
+
+.warn strong {
+  color: #d97706;
+}
+
+.safe strong {
+  color: #16a34a;
+}
+
+.muted strong {
+  color: #4b5563;
+}
+
+.trusted strong {
+  color: #2563eb;
+}
+
+.analysis-state,
+.page-state {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.page-state {
+  margin-top: 8px;
+}
+
+.analysis-state strong,
+.page-state strong {
+  font-size: 13px;
+}
+
+.analysis-state span,
+.page-state span {
+  color: #475569;
+  font-size: 12px;
+}
+
+.analysis-state[data-status="pending"] {
+  border-color: #f59e0b;
+}
+
+.analysis-state[data-status="complete"] {
+  border-color: #2563eb;
+}
+
+.analysis-state[data-status="api_unavailable"] {
+  border-color: #dc2626;
+}
+
+.analysis-state[data-status="disabled"] {
+  border-color: #6b7280;
+}
+
+.page-state[data-verdict="dangerous"] {
+  border-color: #dc2626;
+  background: #fff1f2;
+}
+
+.page-state[data-verdict="suspicious"] {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.page-state[data-verdict="safe"] {
+  border-color: #16a34a;
+  background: #f0fdf4;
+}
+
+.page-state[data-verdict="trusted_by_user"] {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.page-state[data-verdict="not_found"],
+.page-state[data-verdict="unknown"] {
+  border-color: #6b7280;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+button {
+  flex: 1;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: #111827;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button + button {
+  background: #334155;
+}
+
+#status {
+  min-height: 18px;
+  margin: 10px 0 0;
+  color: #475569;
+}

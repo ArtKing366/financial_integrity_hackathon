@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SignalShield Extension Test Page</title>
+    <style>
+      body {
+        max-width: 760px;
+        margin: 32px auto;
+        padding: 0 20px;
+        font: 16px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #111827;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        padding: 10px;
+        border-bottom: 1px solid #e5e7eb;
+        text-align: left;
+      }
+
+      code {
+        font-size: 0.9em;
+      }
+
+      form {
+        display: grid;
+        gap: 10px;
+        margin-top: 24px;
+        padding: 16px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+      }
+
+      input,
+      button {
+        padding: 8px 10px;
+        font: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>SignalShield Extension Test Page</h1>
+      <p>Use this page to check extension highlighting, hover reasons, click-through, and the NOT_FOUND toggle.</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Expected</th>
+            <th>Link</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>SAFE</code></td>
+            <td><a id="safe-allegro" data-expected-verdict="safe" href="https://allegro.pl">Allegro official domain</a></td>
+          </tr>
+          <tr>
+            <td><code>DANGEROUS</code></td>
+            <td><a id="dangerous-brand-login" data-expected-verdict="dangerous" href="https://mbank-login24.pl">Fake mBank login domain</a></td>
+          </tr>
+          <tr>
+            <td><code>SUSPICIOUS</code></td>
+            <td><a id="suspicious-path-keywords" data-expected-verdict="suspicious" href="https://vasiapupkin.xyz/allegro.pl/pay/blik-secure">Untrusted domain with brand path keywords</a></td>
+          </tr>
+          <tr>
+            <td><code>DANGEROUS</code></td>
+            <td><a id="dangerous-ugly-domain" data-expected-verdict="dangerous" href="https://inpost-paczka-za-pobraniem-24.pl">Long hyphen-heavy parcel domain</a></td>
+          </tr>
+          <tr>
+            <td><code>NOT_FOUND</code></td>
+            <td><a id="not-found-mailto" data-expected-verdict="not_found" href="mailto:test@example.com">Unsupported mail link</a></td>
+          </tr>
+          <tr>
+            <td><code>IGNORED</code></td>
+            <td><a id="ignored-signalshield-link" data-ss-ignore="1" data-expected-verdict="ignored" href="https://mbank-login24.pl">Ignored service link</a></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <form action="https://mbank-login24.pl/collect" method="post">
+        <strong>Risky form action demo</strong>
+        <label>
+          Demo login
+          <input name="login" autocomplete="off" value="test-user">
+        </label>
+        <button type="submit">Submit test form</button>
+      </form>
+    </main>
+  </body>
+</html>

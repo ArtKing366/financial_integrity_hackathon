@@ -1,22 +1,45 @@
-"""Этап 1: проверка по чёрному списку CERT Polska."""
-
 from datetime import datetime, timedelta
 from pathlib import Path
+from threading import RLock
 
-import requests
-import tldextract
+from core.domain_utils import extract_registered_domain
+
+try:
+    import requests
+except Exception:
+    requests = None
+
 
 BLACKLIST_URL = "https://hole.cert.pl/domains/domains.txt"
 CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "cert_blacklist.csv"
 CACHE_MAX_AGE_HOURS = 6
+_BLACKLIST_MEMORY_CACHE: set[str] | None = None
+_BLACKLIST_MEMORY_CACHE_TIME: datetime | None = None
+
+# FIX: _BLACKLIST_MEMORY_CACHE was not thread-safe.
+# Two separate assignments (_BLACKLIST_MEMORY_CACHE = ... then
+# _BLACKLIST_MEMORY_CACHE_TIME = ...) could be observed in a torn state by
+# another thread.  A single RLock now guards both reads and writes.
+_BLACKLIST_LOCK = RLock()
+_BLACKLIST_MEMORY_CACHE: set[str] | None = None
+_BLACKLIST_MEMORY_CACHE_TIME: datetime | None = None
+
+FALLBACK_DOMAINS = {
+    "allegro-platnosc24.pl",
+    "allegro-platnosc.pl",
+    "mbank-logowanie.com",
+    "mbank-login24.pl",
+    "mbank-secure.pl",
+    "pko-bp-login.pl",
+    "ing-bank.pl",
+    "olx-payment.pl",
+    "inpost-delivery.pl",
+    "vinted-pay.pl",
+}
 
 
-def extract_domain(url: str) -> str:
-    """Извлекает зарегистрированный домен из URL."""
-    extracted = tldextract.extract(url)
-    if not extracted.domain or not extracted.suffix:
-        return url.lower().strip()
-    return f"{extracted.domain}.{extracted.suffix}".lower()
+def extract_domain(url_or_domain: str) -> str:
+    return extract_registered_domain(url_or_domain).lower().strip()
 
 
 def _load_cached_domains() -> set[str]:
@@ -40,7 +63,10 @@ def _cache_is_fresh() -> bool:
 
 
 def download_blacklist() -> set[str]:
-    """Скачивает список CERT и кэширует в data/cert_blacklist.csv."""
+    if requests is None:
+        cached = _load_cached_domains()
+        return cached | set(FALLBACK_DOMAINS)
+
     try:
         response = requests.get(BLACKLIST_URL, timeout=10)
         response.raise_for_status()
@@ -53,16 +79,42 @@ def download_blacklist() -> set[str]:
         with CACHE_PATH.open("w", encoding="utf-8") as file:
             file.write("domain\n")
             file.write("\n".join(sorted(domains)))
-        return domains
+        return domains | set(FALLBACK_DOMAINS)
     except Exception:
-        return _load_cached_domains()
+        cached = _load_cached_domains()
+        return cached | set(FALLBACK_DOMAINS)
 
 
-def check_blacklist(domain: str) -> bool:
-    """Проверяет домен по кэшированному чёрному списку."""
+def _get_blacklist_domains() -> set[str]:
+    global _BLACKLIST_MEMORY_CACHE, _BLACKLIST_MEMORY_CACHE_TIME
+
+    # Fast path: read under lock so we see a consistent (cache, time) pair.
+    with _BLACKLIST_LOCK:
+        if (
+            _BLACKLIST_MEMORY_CACHE is not None
+            and _BLACKLIST_MEMORY_CACHE_TIME is not None
+            and datetime.now() - _BLACKLIST_MEMORY_CACHE_TIME < timedelta(hours=CACHE_MAX_AGE_HOURS)
+        ):
+            return _BLACKLIST_MEMORY_CACHE
+
+    # Cache miss or stale — do the potentially slow I/O OUTSIDE the lock so we
+    # don't block other threads for the whole download duration.
     if not _cache_is_fresh():
         domains = download_blacklist()
     else:
-        domains = _load_cached_domains()
+        cached = _load_cached_domains()
+        domains = cached | set(FALLBACK_DOMAINS)
 
-    return domain.lower() in domains
+    # Write back under lock — both assignments are atomic w.r.t. other threads.
+    with _BLACKLIST_LOCK:
+        _BLACKLIST_MEMORY_CACHE = domains
+        _BLACKLIST_MEMORY_CACHE_TIME = datetime.now()
+
+    return domains
+
+
+def check_blacklist(url_or_domain: str) -> bool:
+    value = url_or_domain.lower().strip()
+    domain = extract_domain(value)
+    blacklist = _get_blacklist_domains()
+    return value in blacklist or domain in blacklist
