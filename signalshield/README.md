@@ -87,6 +87,36 @@ If you are using Command Prompt (`C:\...>` instead of `PS C:\...>`), run:
 scripts\run_api.cmd
 ```
 
+## Docker
+
+From the repository root:
+
+```bash
+docker compose up --build
+```
+
+This starts:
+
+- Streamlit app: `http://localhost:8501`
+- Local API: `http://127.0.0.1:8766`
+
+The same setup is also available through the explicit compose file name:
+
+```bash
+docker compose -f docker.yml up --build
+```
+
+Runtime state is stored in Docker volumes:
+
+- `signalshield-runtime` for SQLite analytics and local lists.
+- `signalshield-home` for the local API token.
+
+For the browser extension popup, keep the local API URL set to:
+
+```text
+http://127.0.0.1:8766/
+```
+
 The Streamlit analyzer also supports direct links from the browser extension:
 
 ```text

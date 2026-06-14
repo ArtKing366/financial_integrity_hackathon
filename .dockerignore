@@ -1,0 +1,16 @@
+.git
+.gitignore
+node_modules
+test-results
+
+signalshield/.venv
+signalshield/.pytest_cache
+signalshield/**/__pycache__
+signalshield/**/*.pyc
+signalshield/data/*.sqlite3
+signalshield/data/*.sqlite3-*
+signalshield/data/api_token
+
+.env
+.env.*
+*.log
