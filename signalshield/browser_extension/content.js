@@ -166,6 +166,13 @@
     "vinted-pay.pl"
   ]);
 
+  const EMPTY_QUICK_RULES = Object.freeze({
+    version: 0,
+    generated_at: "",
+    trusted_domains: TRUSTED_DOMAINS,
+    fallback_blacklist: Array.from(FALLBACK_BLACKLIST)
+  });
+
   const PATH_KEYWORDS = [
     "blik",
     "platnosc",
