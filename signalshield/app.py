@@ -31,6 +31,13 @@ from core.verdict import (
 
 
 VERDICT_TRUSTED_BY_USER = "TRUSTED_BY_USER"
+VERDICT_LABELS = {
+    VERDICT_DANGEROUS: "Dangerous",
+    VERDICT_SUSPICIOUS: "Suspicious",
+    VERDICT_SAFE: "Safe",
+    VERDICT_NOT_FOUND: "This link does not appear to exist",
+    VERDICT_TRUSTED_BY_USER: "Trusted by user",
+}
 
 
 def get_analysis_cache() -> TtlCache:
@@ -61,6 +68,10 @@ def format_value(value) -> str:
     if isinstance(value, dict):
         return ", ".join(f"{key}: {format_value(item)}" for key, item in value.items())
     return str(value)
+
+
+def verdict_label(verdict: str) -> str:
+    return VERDICT_LABELS.get(str(verdict or "").upper(), str(verdict or "Unknown").replace("_", " ").title())
 
 
 def table_rows(data: dict) -> list[dict[str, str]]:
@@ -265,7 +276,7 @@ def render_technical_details(result: dict) -> None:
     with overview_tab:
         st.markdown("#### Decision summary")
         summary_cols = st.columns(3)
-        summary_cols[0].metric("Verdict", result.get("verdict", "UNKNOWN"))
+        summary_cols[0].metric("Verdict", verdict_label(result.get("verdict", "UNKNOWN")))
         summary_cols[1].metric("Risk score", f"{result.get('score', 0)}%")
         summary_cols[2].metric("Reasons", len(result.get("reasons", [])))
 
@@ -403,17 +414,17 @@ def render_technical_details(result: dict) -> None:
         st.json(result)
 
 
-def render_verdict_banner(result: dict, not_found_label: str = "Page not found") -> None:
+def render_verdict_banner(result: dict, not_found_label: str = "This link does not appear to exist") -> None:
     if result["verdict"] == VERDICT_DANGEROUS:
-        st.error(f"{result['verdict']} (risk: {result['score']}%)")
+        st.error(f"{verdict_label(result['verdict'])} (risk: {result['score']}%)")
     elif result["verdict"] == VERDICT_SUSPICIOUS:
-        st.warning(f"{result['verdict']} (risk: {result['score']}%)")
+        st.warning(f"{verdict_label(result['verdict'])} (risk: {result['score']}%)")
     elif result["verdict"] == VERDICT_TRUSTED_BY_USER:
-        st.info(f"{result['verdict']} (original risk: {result['score']}%)")
+        st.info(f"{verdict_label(result['verdict'])} (original risk: {result['score']}%)")
     elif result["verdict"] == VERDICT_NOT_FOUND:
         st.info(not_found_label)
     else:
-        st.success(f"{result['verdict']}")
+        st.success(f"{verdict_label(result['verdict'])}")
 
 
 def render_external_link_button(label: str, url: str, button_type: str = "primary") -> None:
@@ -448,7 +459,7 @@ def rerun_app() -> None:
 
 def render_navigation_warning(url: str, verdict: str) -> None:
     warning_text = (
-        f"This page was classified as {verdict}. It may be phishing, unreachable, "
+        f"This page was classified as {verdict_label(verdict)}. It may be phishing, unreachable, "
         "or otherwise unsafe. Open it only if you trust the destination."
     )
 
@@ -657,7 +668,7 @@ def render_analytics_page() -> None:
     metric_cols[1].metric("Dangerous", verdicts.get(VERDICT_DANGEROUS, 0))
     metric_cols[2].metric("Suspicious", verdicts.get(VERDICT_SUSPICIOUS, 0))
     metric_cols[3].metric("Safe", verdicts.get(VERDICT_SAFE, 0))
-    metric_cols[4].metric("Not found", verdicts.get(VERDICT_NOT_FOUND, 0))
+    metric_cols[4].metric("Does not exist", verdicts.get(VERDICT_NOT_FOUND, 0))
     metric_cols[5].metric("Trusted", verdicts.get(VERDICT_TRUSTED_BY_USER, 0))
 
     db_cols = st.columns(3)
@@ -713,7 +724,7 @@ def message_link_rows(result: dict) -> list[dict[str, str]]:
             "#": str(index),
             "URL": link.get("url", ""),
             "Domain": characteristics.get("registered_domain", ""),
-            "Verdict": link.get("verdict", ""),
+            "Verdict": verdict_label(link.get("verdict", "")),
             "URL risk": f"{link.get('score', 0)}%",
             "Link signs": risk_label(characteristics.get("score", 0)),
         })
@@ -725,12 +736,13 @@ def render_message_details(result: dict) -> None:
     overview_tab, links_tab, raw_tab = st.tabs(["Overview", "Links", "Raw payload"])
     details = result.get("details", {})
     message_signals = result.get("message_signals", {})
+    email_authenticity = result.get("email_authenticity", {})
     market_manipulation = result.get("market_manipulation", {})
 
     with overview_tab:
         st.markdown("#### Message summary")
         summary_cols = st.columns(4)
-        summary_cols[0].metric("Verdict", result.get("verdict", "UNKNOWN"))
+        summary_cols[0].metric("Verdict", verdict_label(result.get("verdict", "UNKNOWN")))
         summary_cols[1].metric("Risk score", f"{result.get('score', 0)}%")
         summary_cols[2].metric("Links found", details.get("link_count", 0))
         summary_cols[3].metric("Domains", len(details.get("unique_domains", [])))
@@ -740,8 +752,10 @@ def render_message_details(result: dict) -> None:
             "unique_domains": details.get("unique_domains"),
             "max_link_score": details.get("max_link_score"),
             "message_signal_score": details.get("message_signal_score"),
+            "email_authenticity_score": details.get("email_authenticity_score"),
             "market_manipulation_score": details.get("market_manipulation_score"),
             "link_characteristic_score": details.get("link_characteristic_score"),
+            "not_found_link_count": details.get("not_found_link_count"),
         }))
 
         render_stage_section(
@@ -752,6 +766,20 @@ def render_message_details(result: dict) -> None:
             {"total_score": message_signals.get("score", 0)},
             rules=message_signals.get("matched_rules", []),
         )
+
+        if email_authenticity:
+            render_stage_section(
+                "Email authenticity",
+                "Signal found" if email_authenticity.get("score", 0) else "Clear",
+                email_authenticity.get("score", 0),
+                "Checks visible email headers for SPF, DKIM, DMARC, and sender-domain mismatches.",
+                {
+                    "auth_results": email_authenticity.get("auth_results"),
+                    "domains": email_authenticity.get("domains"),
+                    "headers": email_authenticity.get("headers"),
+                },
+                rules=email_authenticity.get("matched_rules", []),
+            )
 
         if market_manipulation:
             render_stage_section(
@@ -778,7 +806,7 @@ def render_message_details(result: dict) -> None:
         else:
             for index, link in enumerate(links, start=1):
                 title = (
-                    f"{index}. {link.get('verdict', 'UNKNOWN')} "
+                    f"{index}. {verdict_label(link.get('verdict', 'UNKNOWN'))} "
                     f"({link.get('score', 0)}%) - {link.get('url', '')}"
                 )
                 with st.expander(title):
@@ -830,6 +858,7 @@ st.title("SignalShield PL")
 st.subheader("Check financial scam risk before you pay")
 
 query_url = get_query_param("url")
+query_message = get_query_param("message")
 query_mode = get_query_param("mode")
 query_auto = get_query_param("auto").lower() in {"1", "true", "yes"}
 mode_options = ["Single link", "Full message", "Lists", "Analytics"]
@@ -872,13 +901,14 @@ elif mode == "Full message":
     message = st.text_area(
         "Paste the full SMS, email, or chat message:",
         height=180,
+        value=query_message,
         placeholder=(
             "Pilne: dopłata do paczki 1.99 zł. "
             "Zaloguj się: vasiapupkin.xyz/allegro.pl/pay/blik-secure"
         ),
     )
 
-    if st.button("Analyze message") and message:
+    if (st.button("Analyze message") or bool(query_message and query_auto)) and message:
         with st.spinner("Analyzing message and all detected links..."):
             result = analyze_message(message, context=make_analysis_context())
             for link in result.get("links", []):
@@ -888,7 +918,7 @@ elif mode == "Full message":
                     source="streamlit_message",
                 )
 
-        render_verdict_banner(result, not_found_label="Message is empty or could not be analyzed")
+        render_verdict_banner(result, not_found_label="This message is empty or could not be analyzed")
         render_reasons(result)
 
         with st.expander("Message analysis details", expanded=True):

@@ -49,7 +49,17 @@ def check_similarity(
     trusted_list: list[str],
     threshold: float = DEFAULT_THRESHOLD,
 ) -> list[tuple[str, float]]:
-    normalized = normalize_domain(domain.lower())
+    domain_lower = domain.lower()
+    normalized = normalize_domain(domain_lower)
+    trusted_normalized_map = {
+        normalize_domain(trusted.lower()): trusted.lower()
+        for trusted in trusted_list
+    }
+
+    exact_trusted = trusted_normalized_map.get(normalized)
+    if exact_trusted == domain_lower:
+        return []
+
     results: dict[str, float] = {}
 
     for trusted in trusted_list:
@@ -57,7 +67,7 @@ def check_similarity(
         trusted_normalized = normalize_domain(trusted_lower)
 
         if normalized == trusted_normalized:
-            if domain.lower() != trusted_lower:
+            if domain_lower != trusted_lower:
                 results[trusted] = max(results.get(trusted, 0.0), 1.0)
             continue
 

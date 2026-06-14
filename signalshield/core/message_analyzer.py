@@ -1,6 +1,7 @@
 import ipaddress
 import re
 import unicodedata
+from email.utils import parseaddr
 from urllib.parse import urlparse
 
 from core.domain_utils import extract_hostname, extract_registered_domain, normalize_url
@@ -120,6 +121,18 @@ MESSAGE_RULES = [
         "description": "Message asks the user to install or use remote access software.",
     },
 ]
+
+
+EMAIL_HEADER_RE = re.compile(
+    r"^(from|reply-to|return-path|sender|subject|authentication-results):\s*(.+)$",
+    flags=re.IGNORECASE | re.MULTILINE,
+)
+
+EMAIL_RESULT_RE = re.compile(
+    r"\b(spf|dkim|dmarc)\s*=\s*([a-z]+)",
+    flags=re.IGNORECASE,
+)
+
 
 def normalize_text(value: str) -> str:
     value = value.lower()
@@ -257,6 +270,91 @@ def analyze_message_signals(message: str) -> dict:
     }
 
 
+def _email_address_domain(value: str) -> str:
+    _name, address = parseaddr(value)
+    if "@" not in address:
+        return ""
+    return extract_registered_domain(address.rsplit("@", 1)[-1].strip())
+
+
+def analyze_email_authenticity(message: str) -> dict:
+    headers: dict[str, str] = {}
+
+    for match in EMAIL_HEADER_RE.finditer(message):
+        headers[match.group(1).lower()] = match.group(2).strip()
+
+    auth_text = headers.get("authentication-results", "")
+    auth_results = {
+        name.lower(): status.lower()
+        for name, status in EMAIL_RESULT_RE.findall(auth_text)
+    }
+    matched_rules = []
+
+    def add_rule(rule_id: str, score: int, description: str, facts: dict | None = None) -> None:
+        matched_rules.append({
+            "id": rule_id,
+            "score": score,
+            "description": description,
+            "facts": facts or {},
+        })
+
+    from_domain = _email_address_domain(headers.get("from", ""))
+    reply_to_domain = _email_address_domain(headers.get("reply-to", ""))
+    return_path_domain = _email_address_domain(headers.get("return-path", ""))
+    sender_domain = _email_address_domain(headers.get("sender", ""))
+
+    for mechanism, status in auth_results.items():
+        if status in {"fail", "softfail", "permerror"}:
+            add_rule(
+                f"{mechanism}_failed",
+                25 if mechanism != "dmarc" else 35,
+                f"Email authentication reports {mechanism.upper()}={status}.",
+                {"mechanism": mechanism, "status": status},
+            )
+
+    comparison_domains = {
+        "reply-to": reply_to_domain,
+        "return-path": return_path_domain,
+        "sender": sender_domain,
+    }
+
+    for field, domain in comparison_domains.items():
+        if from_domain and domain and domain != from_domain:
+            add_rule(
+                f"{field}_domain_mismatch",
+                15,
+                f"Email {field} domain differs from From domain.",
+                {"from_domain": from_domain, f"{field}_domain": domain},
+            )
+
+    if headers and not auth_results:
+        add_rule(
+            "missing_authentication_results",
+            10,
+            "Email headers do not include visible SPF, DKIM, or DMARC results.",
+        )
+
+    return {
+        "score": min(sum(rule["score"] for rule in matched_rules), 50),
+        "matched_rules": matched_rules,
+        "headers": {
+            "from": headers.get("from", ""),
+            "reply_to": headers.get("reply-to", ""),
+            "return_path": headers.get("return-path", ""),
+            "sender": headers.get("sender", ""),
+            "subject": headers.get("subject", ""),
+            "authentication_results": auth_text,
+        },
+        "domains": {
+            "from": from_domain,
+            "reply_to": reply_to_domain,
+            "return_path": return_path_domain,
+            "sender": sender_domain,
+        },
+        "auth_results": auth_results,
+    }
+
+
 def _message_verdict(
     score: int,
     has_only_not_found_links: bool,
@@ -315,14 +413,21 @@ def analyze_message(message: str, context: dict | None = None) -> dict:
         })
 
     message_signals = analyze_message_signals(message)
+    email_authenticity = analyze_email_authenticity(message)
     market_manipulation = detect_market_manipulation(message)
     market_score = int(market_manipulation.get("score", 0) or 0)
+    email_score = int(email_authenticity.get("score", 0) or 0)
     link_characteristic_score = min(
         sum(link["characteristics"]["score"] for link in analyzed_links),
         35,
     )
     max_link_score = max((link["score"] for link in analyzed_links), default=0)
-    non_market_score = max_link_score + message_signals["score"] + link_characteristic_score
+    non_market_score = (
+        max_link_score
+        + message_signals["score"]
+        + link_characteristic_score
+        + email_score
+    )
     total_score = min(non_market_score + market_score, 100)
 
     has_links = bool(analyzed_links)
@@ -341,6 +446,9 @@ def analyze_message(message: str, context: dict | None = None) -> dict:
     for rule in message_signals["matched_rules"]:
         reasons.append(rule["description"])
 
+    for rule in email_authenticity["matched_rules"]:
+        reasons.append(rule["description"])
+
     if market_manipulation.get("matched_rules"):
         reasons.extend(market_manipulation.get("reasons", []))
 
@@ -349,6 +457,12 @@ def analyze_message(message: str, context: dict | None = None) -> dict:
             reasons.append(
                 f"Link {link['url']} was classified as {link['verdict']} "
                 f"(risk: {link['score']}%)."
+            )
+        elif link["verdict"] == VERDICT_NOT_FOUND:
+            link_reasons = " ".join(str(reason) for reason in link.get("reasons", [])[:2])
+            suffix = f" {link_reasons}" if link_reasons else ""
+            reasons.append(
+                f"Link {link['url']} does not appear to exist and could not be verified.{suffix}"
             )
 
         for rule in link["characteristics"]["matched_rules"]:
@@ -372,6 +486,7 @@ def analyze_message(message: str, context: dict | None = None) -> dict:
         "reasons": reasons,
         "links": analyzed_links,
         "message_signals": message_signals,
+        "email_authenticity": email_authenticity,
         "market_manipulation": market_manipulation,
         "details": {
             "message_length": len(message),
@@ -379,7 +494,11 @@ def analyze_message(message: str, context: dict | None = None) -> dict:
             "unique_domains": unique_domains,
             "max_link_score": max_link_score,
             "message_signal_score": message_signals["score"],
+            "email_authenticity_score": email_score,
             "market_manipulation_score": market_score,
             "link_characteristic_score": link_characteristic_score,
+            "not_found_link_count": sum(
+                1 for link in analyzed_links if link["verdict"] == VERDICT_NOT_FOUND
+            ),
         },
     }

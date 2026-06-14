@@ -10,10 +10,26 @@ def test_exact_trusted_domain_is_not_flagged() -> None:
     assert results == []
 
 
+def test_trusted_google_country_domain_is_not_flagged() -> None:
+    results = check_similarity("google.pl", load_trusted_brands())
+    assert results == []
+
+
+def test_exact_trusted_payment_domain_is_not_compared_to_other_payment_brand() -> None:
+    results = check_similarity("tpay.com", load_trusted_brands())
+    assert results == []
+
+
 def test_typosquatting_is_detected() -> None:
     results = check_similarity("allegro-platnosc.pl", load_trusted_brands())
     assert results
     assert results[0][0] == "allegro.pl"
+
+
+def test_google_digit_substitution_is_detected() -> None:
+    results = check_similarity("go0gle.com", load_trusted_brands())
+    assert results
+    assert results[0][0] == "google.com"
 
 
 def test_homograph_attack_is_detected() -> None:

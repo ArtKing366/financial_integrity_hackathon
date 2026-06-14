@@ -7,13 +7,164 @@
     useDeepAnalysis: true,
     openAnalyzerOnClick: true,
     highlightSafeLinks: true,
-    highlightNotFoundLinks: true
+    highlightNotFoundLinks: true,
+    trustedUrls: [],
+    blockedUrls: []
   };
 
-  const EMPTY_QUICK_RULES = {
-    trusted_domains: [],
-    fallback_blacklist: []
-  };
+  const TRUSTED_DOMAINS = [
+    "aliorbank.pl",
+    "allianz.pl",
+    "mbank.pl",
+    "amazon.pl",
+    "apaczka.pl",
+    "apple.com",
+    "apple.com.pl",
+    "apple.pl",
+    "autopay.pl",
+    "bankbps.pl",
+    "bankmillennium.pl",
+    "banknowybfg.pl",
+    "bfg.pl",
+    "bgk.pl",
+    "blik.com",
+    "blue.pl",
+    "bluemedia.pl",
+    "bnpparibas.pl",
+    "bosbank.pl",
+    "cashbill.pl",
+    "ceneo.pl",
+    "centrum24.pl",
+    "citibank.pl",
+    "citihandlowy.pl",
+    "cloudflare.com",
+    "credit-agricole.pl",
+    "db.com",
+    "dhl.com",
+    "dhlparcel.pl",
+    "dnb.pl",
+    "dotpay.pl",
+    "dpd.com.pl",
+    "eon.pl",
+    "ecard.pl",
+    "empik.com",
+    "enea.pl",
+    "energa.pl",
+    "ergohestia.pl",
+    "eservice.pl",
+    "euro.com.pl",
+    "fedex.com",
+    "furgonetka.pl",
+    "gaz-system.pl",
+    "generali.pl",
+    "gls-group.eu",
+    "gls-poland.com",
+    "google.com",
+    "google.com.pl",
+    "google.co.uk",
+    "google.pl",
+    "gov.pl",
+    "hotpay.pl",
+    "imoje.pl",
+    "ing.pl",
+    "inghipoteczny.pl",
+    "innogy.pl",
+    "inpost.pl",
+    "inpost24.pl",
+    "ipko.pl",
+    "k24.pl",
+    "knf.gov.pl",
+    "link4.pl",
+    "localhost",
+    "mediaexpert.pl",
+    "mediamarkt.pl",
+    "mf.gov.pl",
+    "milenet.pl",
+    "millennium.pl",
+    "millenniumbh.pl",
+    "mhipoteczny.pl",
+    "microsoft.com",
+    "microsoft.com.pl",
+    "microsoft.pl",
+    "mojeid.pl",
+    "morele.net",
+    "mozilla.org",
+    "multimedia.pl",
+    "nbp.pl",
+    "neonet.pl",
+    "nestbank.pl",
+    "netia.pl",
+    "nju.pl",
+    "olx.pl",
+    "orange.pl",
+    "orlen.pl",
+    "orlenpaczka.pl",
+    "otomoto.pl",
+    "otodom.pl",
+    "p24.pl",
+    "paczkomaty.pl",
+    "paybynet.pl",
+    "paynow.pl",
+    "payu.com",
+    "pekao.com.pl",
+    "pekao24.pl",
+    "pekaobh.pl",
+    "pfr.pl",
+    "pge.pl",
+    "pgnig.pl",
+    "planetpay.pl",
+    "play.pl",
+    "plus.pl",
+    "plusbank.pl",
+    "plushbezlimitu.pl",
+    "poczta-polska.pl",
+    "pocztowy.pl",
+    "pocztex.pl",
+    "podatki.gov.pl",
+    "pkobh.pl",
+    "pkobp.pl",
+    "pko-bp.pl",
+    "polcard.pl",
+    "przelewy24.pl",
+    "pzu.pl",
+    "rossmann.pl",
+    "rtvagd.pl",
+    "ruch.pl",
+    "santander.pl",
+    "santanderconsumer.pl",
+    "sgb.pl",
+    "t-mobile.pl",
+    "tauron.pl",
+    "toyotabank.pl",
+    "tpay.com",
+    "transferuj.pl",
+    "unicredit.pl",
+    "upc.pl",
+    "ups.com",
+    "vectra.pl",
+    "velobank.pl",
+    "vinted.pl",
+    "vwbank.pl",
+    "warta.pl",
+    "x-kom.pl",
+    "zalando.pl",
+    "zus.pl",
+    "allegro.pl",
+    "allegrolokalnie.pl"
+  ];
+
+  const FALLBACK_BLACKLIST = new Set([
+    "allegro-platnosc24.pl",
+    "allegro-platnosc.pl",
+    "mbank-logowanie.com",
+    "mbank-login24.pl",
+    "mbank-secure.pl",
+    "pko-bp-login.pl",
+    "ing-bank.pl",
+    "olx-payment.pl",
+    "inpost-delivery.pl",
+    "vinted-pay.pl"
+  ]);
 
   const PATH_KEYWORDS = [
     "blik",
@@ -70,7 +221,6 @@
   ]);
 
   const RISKY_FORM_VERDICTS = new Set(["dangerous", "suspicious"]);
-
   const state = {
     config: { ...DEFAULT_CONFIG },
     quickRules: { ...EMPTY_QUICK_RULES },
@@ -127,6 +277,17 @@
     return decodeURIComponentSafe(value)
       .toLowerCase()
       .normalize("NFD")
+      .replace(/[\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017c\u017a]/g, (char) => ({
+        "\u0105": "a",
+        "\u0107": "c",
+        "\u0119": "e",
+        "\u0142": "l",
+        "\u0144": "n",
+        "\u00f3": "o",
+        "\u015b": "s",
+        "\u017c": "z",
+        "\u017a": "z"
+      }[char] || char))
       .replace(/[\u0300-\u036f]/g, "")
       .replace(POLISH_DIACRITICS, (char) => POLISH_CHAR_MAP[char] || char);
   }
@@ -210,6 +371,28 @@
     return new Set(state.quickRules.fallback_blacklist);
   }
 
+  function extensionListSet(key) {
+    const values = Array.isArray(state.config[key]) ? state.config[key] : [];
+    return new Set(values.map((value) => String(value || "").toLowerCase()));
+  }
+
+  function extensionListMatch(parts) {
+    const urlValue = parts.url.href.toLowerCase();
+    const hostname = parts.hostname.toLowerCase();
+    const trusted = extensionListSet("trustedUrls");
+    const blocked = extensionListSet("blockedUrls");
+
+    if (blocked.has(urlValue) || blocked.has(hostname)) {
+      return "blacklist";
+    }
+
+    if (trusted.has(urlValue) || trusted.has(hostname)) {
+      return "trusted";
+    }
+
+    return "";
+  }
+
   function brandTokens() {
     const tokens = new Set();
 
@@ -257,6 +440,7 @@
 
     const reasons = [];
     let score = 0;
+    const extensionMatch = extensionListMatch(parts);
     const trustedDomains = trustedSet();
     const isTrusted = trustedDomains.has(parts.registeredDomain);
     const normalizedTail = normalizeText(`${parts.url.pathname} ${parts.url.search} ${parts.url.hash}`);
@@ -267,7 +451,31 @@
       reasons.push(reason);
     }
 
-    if (fallbackBlacklistSet().has(parts.registeredDomain)) {
+    if (extensionMatch === "blacklist") {
+      return {
+        verdict: "dangerous",
+        score: 100,
+        reasons: ["URL is saved in the extension block list."],
+        url: parts.url.href,
+        hostname: parts.hostname,
+        registeredDomain: parts.registeredDomain,
+        localListType: "blacklist"
+      };
+    }
+
+    if (extensionMatch === "trusted") {
+      return {
+        verdict: "trusted_by_user",
+        score: 0,
+        reasons: ["URL is saved in the extension trusted list."],
+        url: parts.url.href,
+        hostname: parts.hostname,
+        registeredDomain: parts.registeredDomain,
+        localListType: "trusted"
+      };
+    }
+
+    if (FALLBACK_BLACKLIST.has(parts.registeredDomain)) {
       add(100, "Domain is on the demo phishing blacklist.");
     }
 
@@ -361,6 +569,19 @@
     return String(verdict || "unknown").toLowerCase();
   }
 
+  function verdictLabel(verdict) {
+    const normalized = normalizeVerdict(verdict);
+    const labels = {
+      dangerous: "Dangerous",
+      suspicious: "Suspicious",
+      safe: "Safe",
+      not_found: "This link does not appear to exist",
+      trusted_by_user: "Trusted by user",
+      unknown: "Unknown"
+    };
+    return labels[normalized] || normalized.replace(/_/g, " ");
+  }
+
   function isHttpUrl(value) {
     return /^https?:\/\//i.test(String(value || ""));
   }
@@ -381,7 +602,7 @@
       url: safeResult.url || details.input_url || fallbackUrl,
       hostname: safeResult.hostname || details.hostname || (parts ? parts.hostname : ""),
       registeredDomain: safeResult.registeredDomain || details.domain || (parts ? parts.registeredDomain : ""),
-      localListType: localMatch.list_type || "",
+      localListType: safeResult.localListType || localMatch.list_type || "",
       analysisStage: stage,
       updatedAt: new Date().toLocaleTimeString()
     };
@@ -449,7 +670,7 @@
     warning.dataset.verdict = page.verdict;
     warning.innerHTML = [
       "<div>",
-      `<strong>SignalShield warning: ${escapeHtml(page.verdict.toUpperCase())} (${escapeHtml(page.score)}%)</strong>`,
+      `<strong>SignalShield warning: ${escapeHtml(verdictLabel(page.verdict))} (${escapeHtml(page.score)}%)</strong>`,
       `<span>${escapeHtml(pageAnalysisLabel(page))}</span>`,
       `<span>Data entered on this page may be sent to scammers.</span>`,
       page.reasons.length ? `<small>${escapeHtml(page.reasons.slice(0, 2).join(" "))}</small>` : "",
@@ -553,39 +774,48 @@
   }
 
   async function postAnalyzeBatch(links) {
-    let lastError = "Local API request failed.";
+    const response = await backgroundApiPost("/analyze-batch", {
+      page_url: window.location.href,
+      links,
+      source: "extension"
+    });
 
-    for (const baseUrl of apiBaseCandidates()) {
-      try {
-        const response = await fetch(apiUrl("/analyze-batch", baseUrl), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            page_url: window.location.href,
-            links,
-            source: "extension"
-          })
-        });
-
-        if (!response.ok) {
-          lastError = `${baseUrl} returned HTTP ${response.status}.`;
-          continue;
-        }
-
-        const payload = await response.json();
-
-        if (!payload.ok || !Array.isArray(payload.results)) {
-          lastError = `${baseUrl} returned an invalid response.`;
-          continue;
-        }
-
-        return { baseUrl, payload };
-      } catch (_error) {
-        lastError = `${baseUrl} is not reachable from the browser extension.`;
-      }
+    if (!response.payload.ok || !Array.isArray(response.payload.results)) {
+      throw new Error(`${response.baseUrl} returned an invalid response.`);
     }
 
-    throw new Error(lastError);
+    return response;
+  }
+
+  function backgroundApiPost(path, body) {
+    return new Promise((resolve, reject) => {
+      if (!chrome.runtime || !chrome.runtime.sendMessage) {
+        reject(new Error("Extension background worker is unavailable."));
+        return;
+      }
+
+      chrome.runtime.sendMessage({
+        type: "SS_API_POST",
+        path,
+        body,
+        baseUrls: apiBaseCandidates()
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+
+        if (!response || !response.ok) {
+          reject(new Error((response && response.error) || "Local API request failed."));
+          return;
+        }
+
+        resolve({
+          baseUrl: response.baseUrl,
+          payload: response.payload
+        });
+      });
+    });
   }
 
   function shouldIgnoreLink(anchor) {
@@ -638,7 +868,7 @@
     anchor.dataset.ssReasons = JSON.stringify(reasons);
     anchor.dataset.ssUrl = result.url || details.input_url || anchor.href;
     anchor.dataset.ssDomain = result.registeredDomain || details.domain || "";
-    anchor.dataset.ssLocalListType = localMatch.list_type || "";
+    anchor.dataset.ssLocalListType = result.localListType || localMatch.list_type || "";
 
     if (!shouldDisplayVerdict(verdict)) {
       delete anchor.dataset.ssVerdict;
@@ -648,7 +878,7 @@
     anchor.dataset.ssVerdict = verdict;
     anchor.setAttribute(
       "aria-label",
-      `SignalShield: ${verdict}, risk ${result.score || 0} percent. ${reasons.join(" ")}`
+      `SignalShield: ${verdictLabel(verdict)}, risk ${result.score || 0} percent. ${reasons.join(" ")}`
     );
 
     if (anchor.dataset.ssListeners !== "1") {
@@ -929,7 +1159,7 @@
     const tooltip = tooltipElement();
 
     tooltip.innerHTML = [
-      `<strong>SignalShield: ${escapeHtml(verdict.toUpperCase())} (${escapeHtml(score)}%)</strong>`,
+      `<strong>SignalShield: ${escapeHtml(verdictLabel(verdict))} (${escapeHtml(score)}%)</strong>`,
       domain ? `<div>${escapeHtml(domain)}</div>` : "",
       `<div>${escapeHtml(analysisLabel)}</div>`,
       "<ul>",
@@ -1015,7 +1245,7 @@
     ];
 
     if (pageIsRisky) {
-      lines.push(`Current page: ${page.verdict.toUpperCase()} (${page.score}%).`);
+      lines.push(`Current page: ${verdictLabel(page.verdict)} (${page.score}%).`);
       lines.push(`Page domain: ${page.registeredDomain || page.hostname || page.url}.`);
     }
 
@@ -1023,7 +1253,7 @@
       lines.push(`Form destination: ${action.url}.`);
 
       if (actionIsRisky) {
-        lines.push(`Destination verdict: ${action.verdict.toUpperCase()} (${action.score}%).`);
+        lines.push(`Destination verdict: ${verdictLabel(action.verdict)} (${action.score}%).`);
       }
 
       if (
@@ -1168,13 +1398,23 @@
       state.lastDeepSignature = "";
       loadConfig(() => {
         scanPage();
-        sendResponse({ ok: true, stats: state.stats, analysis: state.analysis, page: state.currentPage });
+        sendResponse({
+          ok: true,
+          stats: state.stats,
+          analysis: state.analysis,
+          page: state.currentPage
+        });
       });
       return true;
     }
 
     if (message && message.type === "SS_GET_STATS") {
-      sendResponse({ ok: true, stats: state.stats, analysis: state.analysis, page: state.currentPage });
+      sendResponse({
+        ok: true,
+        stats: state.stats,
+        analysis: state.analysis,
+        page: state.currentPage
+      });
       return false;
     }
 

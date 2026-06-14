@@ -17,6 +17,13 @@ TEST_CASES = [
     ("https://mbank.pl", VERDICT_SAFE),
     ("https://mbank-logowanie.com", VERDICT_DANGEROUS),
     ("https://inpost.pl", VERDICT_SAFE),
+    ("https://www.google.pl", VERDICT_SAFE),
+    ("https://www.google.pl/intl/ru/about/products?tab=mh", VERDICT_SAFE),
+    (
+        "https://secure.tpay.com/Transaction/Status/show/?title=TR-7UFW-VG8E18X&token=5d8111cb5fa3c26d49cf27bde1c190c5f960c471",
+        VERDICT_SAFE,
+    ),
+    ("https://go0gle.com/login", VERDICT_DANGEROUS),
     ("https://vasiapupkin.xyz/allegro.pl/pay/blik-secure", VERDICT_SUSPICIOUS),
     ("https://random-long-domain-name-test.pl/login", VERDICT_DANGEROUS),
 ]
