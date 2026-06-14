@@ -25,8 +25,9 @@ export const test = base.extend({
 
     if (!background) {
       background = await Promise.race([
-        context.waitForEvent('serviceworker'),
-        context.waitForEvent('backgroundpage')
+        context.waitForEvent('serviceworker').catch(() => null),
+        context.waitForEvent('backgroundpage').catch(() => null),
+        timeoutFallback
       ]);
     }
 
