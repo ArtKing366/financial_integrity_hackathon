@@ -10,6 +10,26 @@ COMMON_TWO_PART_SUFFIXES = {
     "co.uk",
     "com.au",
     "co.nz",
+    "co.jp",
+    "com.br",
+    "org.uk",
+    "me.uk",
+    "net.au",
+    "com.mx",
+}
+
+# Schemes that are clearly not navigable web URLs.
+_NON_HTTP_SCHEMES = {
+    "mailto",
+    "ftp",
+    "ftps",
+    "sftp",
+    "tel",
+    "sms",
+    "data",
+    "javascript",
+    "blob",
+    "file",
 }
 
 
@@ -19,7 +39,19 @@ def normalize_url(value: str) -> str:
     if not value:
         return ""
 
-    if not value.startswith(("http://", "https://")):
+    # FIX: Previously, any value that didn't start with "http://" or "https://"
+    # got "https://" prepended blindly, turning "mailto:foo@bar.com" into
+    # "https://mailto:foo@bar.com" — an invalid URL.  We now detect non-HTTP
+    # schemes and return the value unchanged (or empty, to signal invalidity to
+    # callers that check for an empty result).
+    lower = value.lower()
+    for scheme in _NON_HTTP_SCHEMES:
+        if lower.startswith(f"{scheme}:"):
+            # Not a web URL; returning empty string signals "not a web URL"
+            # to callers that use extract_hostname / split_domain.
+            return ""
+
+    if not lower.startswith(("http://", "https://")):
         value = "https://" + value
 
     return value

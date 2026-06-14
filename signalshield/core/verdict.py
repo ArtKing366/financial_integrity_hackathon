@@ -78,11 +78,6 @@ try:
 except Exception:
     check_domain_entropy = None
 
-try:
-    from core.market_manipulation import detect_market_manipulation
-except Exception:
-    detect_market_manipulation = None
-
 @lru_cache(maxsize=1)
 def load_trusted_brands() -> list[str]:
     project_root = Path(__file__).resolve().parents[1]

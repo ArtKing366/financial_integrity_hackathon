@@ -115,6 +115,8 @@
     "co.nz"
   ]);
 
+  const RISKY_FORM_VERDICTS = new Set(["dangerous", "suspicious"]);
+
   const state = {
     config: { ...DEFAULT_CONFIG },
     stats: {
@@ -134,6 +136,18 @@
       deepTotal: 0,
       updatedAt: ""
     },
+    currentPage: {
+      verdict: "unknown",
+      score: 0,
+      reasons: [],
+      url: window.location.href,
+      hostname: window.location.hostname,
+      registeredDomain: "",
+      analysisStage: "quick_js",
+      updatedAt: ""
+    },
+    formActions: {},
+    dismissedPageWarningSignature: "",
     scanTimer: null,
     deepTimer: null,
     lastDeepSignature: ""
@@ -362,6 +376,126 @@
     return String(verdict || "unknown").toLowerCase();
   }
 
+  function isHttpUrl(value) {
+    return /^https?:\/\//i.test(String(value || ""));
+  }
+
+  function normalizeAnalysisResult(result, fallbackUrl, stage = "quick_js") {
+    const safeResult = result || {};
+    const details = safeResult.details || {};
+    const verdict = normalizeVerdict(safeResult.verdict);
+    const score = Number(safeResult.score || 0);
+    const reasons = Array.isArray(safeResult.reasons) ? safeResult.reasons : [];
+    const parts = getUrlParts(safeResult.url || details.input_url || fallbackUrl);
+
+    return {
+      verdict,
+      score,
+      reasons,
+      url: safeResult.url || details.input_url || fallbackUrl,
+      hostname: safeResult.hostname || details.hostname || (parts ? parts.hostname : ""),
+      registeredDomain: safeResult.registeredDomain || details.domain || (parts ? parts.registeredDomain : ""),
+      analysisStage: stage,
+      updatedAt: new Date().toLocaleTimeString()
+    };
+  }
+
+  function pageWarningSignature(page = state.currentPage) {
+    return `${page.url}|${page.verdict}|${page.score}|${page.analysisStage}`;
+  }
+
+  function pageAnalysisLabel(page = state.currentPage) {
+    if (page.analysisStage === "python") {
+      return "Python deep analysis completed for the current page.";
+    }
+
+    if (state.config.useDeepAnalysis) {
+      if (state.analysis.status === "pending") {
+        return "Current page has a quick browser check; Python analysis is still running.";
+      }
+
+      if (state.analysis.status === "api_unavailable") {
+        return "Current page has only a quick browser check because the local API is unavailable.";
+      }
+    }
+
+    return "Current page has a quick browser-side check.";
+  }
+
+  function pageWarningElement() {
+    let warning = document.getElementById("ss-page-warning");
+
+    if (!warning) {
+      warning = document.createElement("div");
+      warning.id = "ss-page-warning";
+      warning.setAttribute("role", "alert");
+      document.documentElement.appendChild(warning);
+    }
+
+    return warning;
+  }
+
+  function hidePageWarning() {
+    const warning = document.getElementById("ss-page-warning");
+
+    if (warning) {
+      warning.remove();
+    }
+  }
+
+  function renderPageWarning() {
+    const page = state.currentPage;
+    const signature = pageWarningSignature(page);
+
+    if (!RISKY_FORM_VERDICTS.has(page.verdict) || state.dismissedPageWarningSignature === signature) {
+      hidePageWarning();
+      return;
+    }
+
+    const warning = pageWarningElement();
+
+    if (warning.dataset.signature === signature) {
+      return;
+    }
+
+    warning.dataset.signature = signature;
+    warning.dataset.verdict = page.verdict;
+    warning.innerHTML = [
+      "<div>",
+      `<strong>SignalShield warning: ${escapeHtml(page.verdict.toUpperCase())} (${escapeHtml(page.score)}%)</strong>`,
+      `<span>${escapeHtml(pageAnalysisLabel(page))}</span>`,
+      `<span>Data entered on this page may be sent to scammers.</span>`,
+      page.reasons.length ? `<small>${escapeHtml(page.reasons.slice(0, 2).join(" "))}</small>` : "",
+      "</div>",
+      '<div class="ss-page-warning-actions">',
+      '<button type="button" data-ss-action="analysis">Full analysis</button>',
+      '<button type="button" data-ss-action="dismiss">Dismiss</button>',
+      "</div>"
+    ].join("");
+  }
+
+  function applyCurrentPageResult(result, stage = "quick_js") {
+    state.currentPage = normalizeAnalysisResult(result, window.location.href, stage);
+    renderPageWarning();
+  }
+
+  function applyFormActionResult(url, result, stage = "quick_js") {
+    state.formActions[url] = normalizeAnalysisResult(result, url, stage);
+  }
+
+  function applyQuickCurrentPageResult() {
+    if (
+      state.config.useDeepAnalysis
+      && state.currentPage.url === window.location.href
+      && state.currentPage.analysisStage === "python"
+    ) {
+      renderPageWarning();
+      return;
+    }
+
+    applyCurrentPageResult(classifyHref(window.location.href), "quick_js");
+  }
+
   function setAnalysisStatus(status, label, detail, deepChecked = 0, deepTotal = 0) {
     state.analysis = {
       status,
@@ -371,6 +505,7 @@
       deepTotal,
       updatedAt: new Date().toLocaleTimeString()
     };
+    renderPageWarning();
   }
 
   function linkAnalysisLabel(anchor) {
@@ -568,6 +703,7 @@
 
   function scanPage() {
     resetStats();
+    applyQuickCurrentPageResult();
     setAnalysisStatus(
       state.config.useDeepAnalysis ? "quick_js" : "disabled",
       state.config.useDeepAnalysis ? "Quick JS check" : "Python deep analysis off",
@@ -631,6 +767,53 @@
     return mapping;
   }
 
+  function currentPageUrl() {
+    return isHttpUrl(window.location.href) ? window.location.href : "";
+  }
+
+  function formActionUrl(form) {
+    const rawAction = form.getAttribute("action") || window.location.href;
+
+    try {
+      const url = new URL(rawAction, window.location.href);
+      return isHttpUrl(url.href) ? url.href : "";
+    } catch (_error) {
+      return "";
+    }
+  }
+
+  function formActionUrls() {
+    const urls = new Set();
+
+    for (const form of document.querySelectorAll("form")) {
+      const actionUrl = formActionUrl(form);
+
+      if (actionUrl) {
+        urls.add(actionUrl);
+      }
+    }
+
+    return urls;
+  }
+
+  function deepAnalysisTargets() {
+    const mapping = anchorsByUrl();
+    const pageUrl = currentPageUrl();
+    const actionUrls = formActionUrls();
+    const links = [
+      pageUrl,
+      ...Array.from(mapping.keys()),
+      ...Array.from(actionUrls)
+    ].filter(isHttpUrl);
+
+    return {
+      mapping,
+      pageUrl,
+      actionUrls,
+      links: Array.from(new Set(links))
+    };
+  }
+
   function scheduleDeepAnalysis() {
     if (!state.config.useDeepAnalysis) {
       setAnalysisStatus(
@@ -646,8 +829,7 @@
   }
 
   async function runDeepAnalysis() {
-    const mapping = anchorsByUrl();
-    const links = Array.from(mapping.keys()).filter((url) => /^https?:\/\//i.test(url));
+    const { mapping, pageUrl, actionUrls, links } = deepAnalysisTargets();
     const signature = `${window.location.href}|${links.join("|")}`;
 
     if (!links.length) {
@@ -678,6 +860,14 @@
 
       for (const item of payload.results) {
         const anchors = mapping.get(item.url) || [];
+
+        if (item.url === pageUrl) {
+          applyCurrentPageResult(item.result || {}, "python");
+        }
+
+        if (actionUrls.has(item.url)) {
+          applyFormActionResult(item.url, item.result || {}, "python");
+        }
 
         for (const anchor of anchors) {
           applyAnalysisResult(anchor, item.result || {}, "python");
@@ -782,6 +972,127 @@
     window.open(analyzerUrl(targetUrl), "_blank", "noopener,noreferrer");
   }
 
+  function shouldIgnoreForm(form) {
+    return Boolean(form.closest(
+      '[data-ss-ignore="1"], [data-signalshield-ignore="1"], .ss-ignore, .ss-no-extension'
+    ));
+  }
+
+  function formActionAnalysis(form) {
+    const actionUrl = formActionUrl(form);
+
+    if (!actionUrl) {
+      return null;
+    }
+
+    if (actionUrl === state.currentPage.url && state.currentPage.verdict !== "unknown") {
+      return state.currentPage;
+    }
+
+    if (!state.formActions[actionUrl]) {
+      applyFormActionResult(actionUrl, classifyHref(actionUrl), "quick_js");
+    }
+
+    return state.formActions[actionUrl];
+  }
+
+  function formWarningMessage(form) {
+    const page = state.currentPage;
+    const action = formActionAnalysis(form);
+    const pageIsRisky = RISKY_FORM_VERDICTS.has(page.verdict);
+    const actionIsRisky = action && RISKY_FORM_VERDICTS.has(action.verdict);
+
+    if (!pageIsRisky && !actionIsRisky) {
+      return "";
+    }
+
+    const lines = [
+      "SignalShield warning",
+      "",
+      "Data typed into this form may be sent to scammers."
+    ];
+
+    if (pageIsRisky) {
+      lines.push(`Current page: ${page.verdict.toUpperCase()} (${page.score}%).`);
+      lines.push(`Page domain: ${page.registeredDomain || page.hostname || page.url}.`);
+    }
+
+    if (action) {
+      lines.push(`Form destination: ${action.url}.`);
+
+      if (actionIsRisky) {
+        lines.push(`Destination verdict: ${action.verdict.toUpperCase()} (${action.score}%).`);
+      }
+
+      if (
+        action.registeredDomain
+        && page.registeredDomain
+        && action.registeredDomain !== page.registeredDomain
+      ) {
+        lines.push(`The form submits outside the current domain: ${action.registeredDomain}.`);
+      }
+    }
+
+    const reasons = [
+      ...(pageIsRisky ? page.reasons : []),
+      ...(actionIsRisky && action ? action.reasons : [])
+    ].slice(0, 4);
+
+    if (reasons.length) {
+      lines.push("");
+      lines.push("Reasons:");
+      for (const reason of reasons) {
+        lines.push(`- ${reason}`);
+      }
+    }
+
+    lines.push("");
+    lines.push("Press OK to submit anyway, or Cancel to stay on this page.");
+    return lines.join("\n");
+  }
+
+  function handleFormSubmit(event) {
+    const form = event.target;
+
+    if (!(form instanceof HTMLFormElement) || shouldIgnoreForm(form)) {
+      return;
+    }
+
+    const warning = formWarningMessage(form);
+
+    if (!warning) {
+      return;
+    }
+
+    if (!window.confirm(warning)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }
+
+  function handlePageWarningClick(event) {
+    if (!(event.target instanceof Element)) {
+      return;
+    }
+
+    const button = event.target.closest("#ss-page-warning button");
+
+    if (!button) {
+      return;
+    }
+
+    const action = button.dataset.ssAction;
+
+    if (action === "analysis") {
+      window.open(analyzerUrl(state.currentPage.url), "_blank", "noopener,noreferrer");
+    }
+
+    if (action === "dismiss") {
+      state.dismissedPageWarningSignature = pageWarningSignature();
+      hidePageWarning();
+    }
+  }
+
   function escapeHtml(value) {
     return String(value)
       .replace(/&/g, "&amp;")
@@ -808,13 +1119,13 @@
       state.lastDeepSignature = "";
       loadConfig(() => {
         scanPage();
-        sendResponse({ ok: true, stats: state.stats, analysis: state.analysis });
+        sendResponse({ ok: true, stats: state.stats, analysis: state.analysis, page: state.currentPage });
       });
       return true;
     }
 
     if (message && message.type === "SS_GET_STATS") {
-      sendResponse({ ok: true, stats: state.stats, analysis: state.analysis });
+      sendResponse({ ok: true, stats: state.stats, analysis: state.analysis, page: state.currentPage });
       return false;
     }
 
@@ -823,6 +1134,8 @@
 
   loadConfig(() => {
     scanPage();
+    document.addEventListener("submit", handleFormSubmit, true);
+    document.addEventListener("click", handlePageWarningClick, true);
     const observer = new MutationObserver(scheduleScan);
     observer.observe(document.documentElement, {
       childList: true,

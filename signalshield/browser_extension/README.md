@@ -5,6 +5,8 @@ Manifest V3 extension that highlights links on the current page with a quick loc
 ## What It Does
 
 - Scans every `<a href>` on the current page.
+- Checks the current page URL itself, so manually opened phishing pages are still classified.
+- Checks form destinations and warns before submitting data from suspicious or dangerous pages.
 - Highlights links:
   - red: dangerous
   - amber: suspicious
@@ -12,6 +14,7 @@ Manifest V3 extension that highlights links on the current page with a quick loc
   - gray: not found, unknown, or unsupported
   - blue: trusted by user
 - Shows a hover tooltip with the reasons.
+- Shows a top-page warning when the current page is suspicious or dangerous.
 - Opens the Streamlit SignalShield analyzer when a highlighted link is clicked.
 - Sends links to the local SignalShield API for Python deep analysis when enabled.
 - Shows whether the current page is only quick JS checked, waiting for Python, Python-complete, or API-unavailable.
@@ -56,8 +59,9 @@ The extension uses lightweight browser-side heuristics for real-time feedback. T
 
 ## Notes
 
-- The extension highlights links immediately with browser-side heuristics, then upgrades results through the local API when it is running.
+- The extension highlights links and checks the current page immediately with browser-side heuristics, then upgrades results through the local API when it is running.
 - Click-through opens `http://localhost:8501/?mode=link&url=...&auto=1`, which pre-fills and runs the existing full analyzer.
+- Form submission warnings use the current page verdict and the form `action` URL verdict. The user can still continue after confirming.
 - Safe-link highlighting, NOT_FOUND highlighting, and click interception can be changed in the popup.
 - The Save button stores settings and reloads the active page so the new highlighting rules apply immediately.
 - If the local API is not running, the extension falls back to the instant browser-side scan.

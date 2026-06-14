@@ -89,6 +89,10 @@ Expected behavior:
 - Safe links are green when safe highlighting is enabled.
 - NOT_FOUND links are gray when NOT_FOUND highlighting is enabled.
 - User-trusted links are blue after a matching trusted-list entry exists in SQLite and the local API is running.
+- The popup shows a separate current-page verdict in addition to link counts.
+- A suspicious or dangerous current page shows a SignalShield warning banner even if the page has no links.
+- Submitting a form on a suspicious or dangerous current page shows a confirmation warning.
+- Submitting a form whose `action` URL is suspicious or dangerous also shows a confirmation warning.
 - Links with `data-ss-ignore="1"` are not highlighted, do not show SignalShield tooltips, and are not intercepted.
 - Clicking a highlighted link opens the Streamlit analyzer when click interception is enabled.
 - Clicking an ignored service link follows the original URL.

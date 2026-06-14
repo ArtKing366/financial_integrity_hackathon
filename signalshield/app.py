@@ -695,6 +695,7 @@ def render_message_details(result: dict) -> None:
     overview_tab, links_tab, raw_tab = st.tabs(["Overview", "Links", "Raw payload"])
     details = result.get("details", {})
     message_signals = result.get("message_signals", {})
+    market_manipulation = result.get("market_manipulation", {})
 
     with overview_tab:
         st.markdown("#### Message summary")
@@ -709,6 +710,7 @@ def render_message_details(result: dict) -> None:
             "unique_domains": details.get("unique_domains"),
             "max_link_score": details.get("max_link_score"),
             "message_signal_score": details.get("message_signal_score"),
+            "market_manipulation_score": details.get("market_manipulation_score"),
             "link_characteristic_score": details.get("link_characteristic_score"),
         }))
 
@@ -720,6 +722,16 @@ def render_message_details(result: dict) -> None:
             {"total_score": message_signals.get("score", 0)},
             rules=message_signals.get("matched_rules", []),
         )
+
+        if market_manipulation:
+            render_stage_section(
+                "Market manipulation",
+                market_manipulation.get("status", "SAFE"),
+                market_manipulation.get("score", 0),
+                "Looks for pump-and-dump, unrealistic return, insider-tip, and signal-group language.",
+                {"matched_rules": market_manipulation.get("matched_rules", [])},
+                evidence=market_manipulation.get("reasons", []),
+            )
 
         rows = message_link_rows(result)
         if rows:
