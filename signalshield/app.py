@@ -852,9 +852,9 @@ def get_query_param(name: str, default: str = "") -> str:
     return value or default
 
 
-st.set_page_config(page_title="SignalShield PL", page_icon="🛡️")
+st.set_page_config(page_title="SignalShield PL")
 
-st.title("🛡️ SignalShield PL")
+st.title("SignalShield PL")
 st.subheader("Check financial scam risk before you pay")
 
 query_url = get_query_param("url")
