@@ -1,16 +1,6 @@
+"""Market-manipulation and pump-and-dump text heuristics."""
+
 import re
-
-
-# ---------------------------------------------------------------------------
-# Rule definitions
-# ---------------------------------------------------------------------------
-# Design principles:
-# 1. Use \b word boundaries to avoid partial-word matches.
-# 2. Context-sensitive phrases: financial words required around ambiguous terms
-#    (moon, rocket, coin, entry, stock, exchange, broker, telegram).
-# 3. Single weak signals (≤10 pts) stay below SUSPICIOUS (≥35) on their own.
-# 4. Combination bonuses fire when multiple independent signals align.
-# ---------------------------------------------------------------------------
 
 RULES = [
     {
@@ -31,10 +21,6 @@ RULES = [
     {
         "id": "unrealistic_return",
         "weight": 30,
-        # "to the moon" only when financial context appears within ±40 chars.
-        # Bare "moon" in astronomy context won't trigger this.
-        # x\d+ only when followed/preceded by financial words OR is explicitly
-        # one of the well-known multiplier shorthands used in crypto (10x, 100x, 1000x).
         "pattern": (
             r"(\b\d{2,4}\s?%\s*(zwrot|zysk|profit|return|gain)"
             r"|\b\d+\s*x\s+(profit|zysk|zwrot|return|gain|more|wi[eę]cej)"
@@ -48,7 +34,6 @@ RULES = [
     {
         "id": "time_pressure",
         "weight": 20,
-        # "tylko dziś" / "buy now" only in financial context within the same phrase.
         "pattern": (
             r"(kup\s+teraz\s+.{0,30}(crypto|krypto|coin|akcj|token|btc|eth|invest)"
             r"|buy\s+now\s+.{0,30}(crypto|coin|token|invest|profit)"
@@ -98,9 +83,6 @@ RULES = [
     {
         "id": "pump_language",
         "weight": 35,
-        # "moon" and "rocket" require surrounding financial context.
-        # "to the moon" (multi-word) requires financial context (handled in unrealistic_return).
-        # Standalone pump-specific slang (pumpujemy, pompka) is clear enough.
         "pattern": (
             r"(pumpujemy"
             r"|pompujemy"
@@ -117,8 +99,6 @@ RULES = [
     {
         "id": "signal_group",
         "weight": 35,
-        # Telegram/Discord/WhatsApp alone are general-purpose apps.
-        # Only score when combined with investment/VIP/signal wording.
         "pattern": (
             r"((telegram|discord|whatsapp)\s+.{0,30}(vip|sygnał|signal|invest|pump|zysk|profit|group|gruppe|grupa))"
             r"|(vip\s+group"
@@ -147,8 +127,6 @@ RULES = [
     {
         "id": "hype_language",
         "weight": 15,
-        # Speculative promotion language used to build irrational excitement
-        # around an asset without making an explicit profit promise.
         "pattern": (
             r"(next\s+(gem|moonshot|bitcoin|btc|eth|100x|1000x)"
             r"|hidden\s+gem"
@@ -164,7 +142,6 @@ RULES = [
     {
         "id": "trading_context",
         "weight": 10,
-        # Tightly scoped: only clearly financial terms, not everyday words.
         "pattern": (
             r"(\bakcje\b"
             r"|\bcrypto(currency)?\b"
@@ -226,9 +203,6 @@ def detect_market_manipulation(text: str) -> dict:
             matched_rules.append(rule["id"])
             reasons.append(rule["reason"])
 
-    # ------------------------------------------------------------------
-    # Combination bonuses — strong when multiple independent signals fire.
-    # ------------------------------------------------------------------
     has_trading_context = "trading_context" in matched_rules or "ticker_symbol" in matched_rules
     has_profit_promise = "guaranteed_profit" in matched_rules or "unrealistic_return" in matched_rules
     has_pressure = "time_pressure" in matched_rules or "investment_call_to_action" in matched_rules

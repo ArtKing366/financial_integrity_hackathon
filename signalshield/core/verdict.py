@@ -19,10 +19,11 @@ HTML_FETCH_TTL_SECONDS = 60
 
 
 try:
-    from core.local_db import LIST_BLACKLIST, LIST_TRUSTED, find_list_match
+    from core.local_db import LIST_BLACKLIST, LIST_TRUSTED, SOURCE_USER, find_list_match
 except Exception:
     LIST_BLACKLIST = "blacklist"
     LIST_TRUSTED = "trusted"
+    SOURCE_USER = "user"
     find_list_match = None
 
 
@@ -282,19 +283,28 @@ def analyze_url(url: str, context: dict[str, Any] | None = None) -> dict:
         details["local_list_match"] = local_match
 
         if local_match and local_match.get("list_type") == LIST_BLACKLIST:
+            blacklist_reason = "URL or domain is on the local SignalShield blacklist."
+
+            if local_match.get("source") == "cert_polska":
+                blacklist_reason = "Domain is listed in CERT Polska blacklist - confirmed phishing."
+
             return {
                 "verdict": VERDICT_DANGEROUS,
                 "score": 100,
-                "reasons": [
-                    "URL or domain is on the local SignalShield blacklist."
-                ],
+                "reasons": [blacklist_reason],
                 "details": details,
             }
 
-        if local_match and local_match.get("list_type") == LIST_TRUSTED:
+        if (
+            local_match
+            and local_match.get("list_type") == LIST_TRUSTED
+            and local_match.get("source", SOURCE_USER) == SOURCE_USER
+        ):
             trusted_match = local_match
+        elif local_match and local_match.get("list_type") == LIST_TRUSTED:
+            details["system_trusted_match"] = local_match
 
-    if check_blacklist is not None:
+    if check_blacklist is not None and trusted_match is None:
         try:
             is_blacklisted = cache_get(
                 context,
@@ -317,7 +327,10 @@ def analyze_url(url: str, context: dict[str, Any] | None = None) -> dict:
                 "details": details,
             }
     else:
-        details["blacklist_status"] = "Blacklist module is not available."
+        if trusted_match is not None:
+            details["blacklist_status"] = "Skipped because the user trusted this exact target."
+        else:
+            details["blacklist_status"] = "Blacklist module is not available."
 
     if check_subdomain_spoofing is not None:
         try:

@@ -1,5 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
-from threading import Lock
+from threading import Event, Lock
 from time import sleep
 
 import pytest
@@ -78,3 +78,30 @@ def test_ttl_cache_shares_concurrent_factory_for_same_key() -> None:
 
     assert results == ["shared-value"] * 8
     assert calls["count"] == 1
+
+
+def test_ttl_cache_limits_distinct_inflight_factories() -> None:
+    cache = TtlCache(max_inflight=1)
+    started = Event()
+    release = Event()
+
+    def slow_factory() -> str:
+        started.set()
+        release.wait(2)
+        return "slow-value"
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(
+            cache.get_or_set,
+            "dns",
+            "first.example",
+            10,
+            slow_factory,
+        )
+        assert started.wait(1)
+
+        with pytest.raises(RuntimeError, match="in-flight limit"):
+            cache.get_or_set("dns", "second.example", 10, lambda: "second-value")
+
+        release.set()
+        assert future.result(timeout=3) == "slow-value"

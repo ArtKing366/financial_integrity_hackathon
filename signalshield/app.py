@@ -9,11 +9,13 @@ from core.local_db import (
     SCOPE_DOMAIN,
     SCOPE_URL,
     add_list_entry,
+    database_status,
     deactivate_list_entry,
     expiry_from_choice,
     list_entries,
     recent_scan_events,
     record_scan_event,
+    sync_builtin_lists,
     summarize_page_domains,
     summarize_verdicts,
 )
@@ -40,6 +42,11 @@ def get_analysis_cache() -> TtlCache:
 
 def make_analysis_context() -> dict:
     return new_analysis_context(shared_cache=get_analysis_cache())
+
+
+@st.cache_resource
+def ensure_builtin_lists_synced() -> dict:
+    return sync_builtin_lists()
 
 
 def format_value(value) -> str:
@@ -553,6 +560,21 @@ def list_type_label(list_type: str) -> str:
 def render_lists_page() -> None:
     st.header("Local lists")
     st.caption("Entries match only exact URLs or exact hostnames. Subdomains are not trusted automatically.")
+    sync_summary = ensure_builtin_lists_synced()
+    status = database_status()
+    st.caption(f"SQLite database: {status['db_path']}")
+    st.caption(
+        "Built-in lists synced: "
+        f"CERT {sync_summary['cert_polska']['available']} domains, "
+        f"trusted brands {sync_summary['trusted_brands']['available']} domains."
+    )
+
+    list_cols = st.columns(5)
+    list_cols[0].metric("User entries", status["user_entries"]["total"])
+    list_cols[1].metric("User trusted", status["user_entries"].get(LIST_TRUSTED, 0))
+    list_cols[2].metric("User blocked", status["user_entries"].get(LIST_BLACKLIST, 0))
+    list_cols[3].metric("System entries", status["managed_entries"]["total"])
+    list_cols[4].metric("Exact URLs", status["active_scopes"].get(SCOPE_URL, 0))
 
     with st.form("manual_list_entry"):
         list_label = st.radio(
@@ -624,6 +646,9 @@ def render_lists_page() -> None:
 
 def render_analytics_page() -> None:
     st.header("Service analytics")
+    ensure_builtin_lists_synced()
+    status = database_status()
+    st.caption(f"SQLite database: {status['db_path']}")
 
     verdicts = summarize_verdicts()
     total = sum(verdicts.values())
@@ -634,6 +659,11 @@ def render_analytics_page() -> None:
     metric_cols[3].metric("Safe", verdicts.get(VERDICT_SAFE, 0))
     metric_cols[4].metric("Not found", verdicts.get(VERDICT_NOT_FOUND, 0))
     metric_cols[5].metric("Trusted", verdicts.get(VERDICT_TRUSTED_BY_USER, 0))
+
+    db_cols = st.columns(3)
+    db_cols[0].metric("Page domains", status["scan_events"]["page_domains"])
+    db_cols[1].metric("User list entries", status["user_entries"]["total"])
+    db_cols[2].metric("Last scan", status["scan_events"]["last_seen"] or "None")
 
     page_rows = summarize_page_domains()
     st.markdown("#### Page domains")

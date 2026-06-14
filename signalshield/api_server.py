@@ -12,9 +12,13 @@ from urllib.parse import parse_qs, urlparse
 from core.analysis_cache import TtlCache
 from core.local_db import (
     add_list_entry,
+    database_status,
+    deactivate_list_entry,
     expiry_from_choice,
+    list_entries,
     recent_scan_events,
     record_scan_event,
+    sync_builtin_lists,
     summarize_page_domains,
     summarize_verdicts,
 )
@@ -65,6 +69,11 @@ def group_links_by_domain(links: list[str]) -> list[list[str]]:
     return list(groups.values())
 
 
+def query_flag(params: dict[str, list[str]], key: str) -> bool:
+    value = (params.get(key) or [""])[0].strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def analyze_link_group(links: list[str]) -> list[dict[str, Any]]:
     context = new_analysis_context(shared_cache=SHARED_ANALYSIS_CACHE)
     return [
@@ -112,7 +121,7 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
     def end_headers(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         super().end_headers()
 
     def do_OPTIONS(self) -> None:
@@ -137,6 +146,25 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
             })
             return
 
+        if parsed.path == "/list-entries":
+            params = parse_qs(parsed.query)
+            self.send_json({
+                "ok": True,
+                "entries": list_entries(
+                    include_inactive=query_flag(params, "include_inactive"),
+                    include_expired=query_flag(params, "include_expired"),
+                    include_system=query_flag(params, "include_system"),
+                ),
+            })
+            return
+
+        if parsed.path == "/database/status":
+            self.send_json({
+                "ok": True,
+                "status": database_status(),
+            })
+            return
+
         self.send_json({"ok": False, "error": "Not found"}, status=404)
 
     def do_POST(self) -> None:
@@ -152,6 +180,23 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/list-entry":
             self.handle_list_entry()
+            return
+
+        if parsed.path == "/list-entry/deactivate":
+            self.handle_deactivate_list_entry_body()
+            return
+
+        if parsed.path == "/database/sync":
+            self.handle_database_sync()
+            return
+
+        self.send_json({"ok": False, "error": "Not found"}, status=404)
+
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+
+        if parsed.path == "/list-entry":
+            self.handle_deactivate_list_entry_query(parsed)
             return
 
         self.send_json({"ok": False, "error": "Not found"}, status=404)
@@ -245,6 +290,41 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
                 return
             self.send_json({"ok": False, "error": str(error)}, status=400)
 
+    def handle_database_sync(self) -> None:
+        try:
+            payload = self.read_json()
+            result = sync_builtin_lists(force=bool(payload.get("force", False)))
+            self.send_json({"ok": True, "sync": result})
+        except Exception as error:
+            if is_client_disconnect(error):
+                return
+            self.send_json({"ok": False, "error": str(error)}, status=400)
+
+    def deactivate_entry(self, entry_id: int) -> None:
+        if entry_id <= 0:
+            raise ValueError("entry_id must be a positive integer")
+
+        removed = deactivate_list_entry(entry_id)
+        self.send_json({"ok": True, "removed": removed})
+
+    def handle_deactivate_list_entry_query(self, parsed) -> None:
+        try:
+            params = parse_qs(parsed.query)
+            self.deactivate_entry(int((params.get("id") or ["0"])[0]))
+        except Exception as error:
+            if is_client_disconnect(error):
+                return
+            self.send_json({"ok": False, "error": str(error)}, status=400)
+
+    def handle_deactivate_list_entry_body(self) -> None:
+        try:
+            payload = self.read_json()
+            self.deactivate_entry(int(payload.get("id", 0) or 0))
+        except Exception as error:
+            if is_client_disconnect(error):
+                return
+            self.send_json({"ok": False, "error": str(error)}, status=400)
+
     def log_message(self, format: str, *args: Any) -> None:
         return
 
@@ -255,6 +335,7 @@ def main() -> None:
     parser.add_argument("--port", default=8766, type=int)
     args = parser.parse_args()
 
+    sync_builtin_lists()
     server = ThreadingHTTPServer((args.host, args.port), SignalShieldHandler)
     print(f"SignalShield API listening on http://{args.host}:{args.port}")
     server.serve_forever()

@@ -14,10 +14,6 @@ BLACKLIST_URL = "https://hole.cert.pl/domains/domains.txt"
 CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "cert_blacklist.csv"
 CACHE_MAX_AGE_HOURS = 6
 
-# FIX: _BLACKLIST_MEMORY_CACHE was not thread-safe.
-# Two separate assignments (_BLACKLIST_MEMORY_CACHE = ... then
-# _BLACKLIST_MEMORY_CACHE_TIME = ...) could be observed in a torn state by
-# another thread.  A single RLock now guards both reads and writes.
 _BLACKLIST_LOCK = RLock()
 _BLACKLIST_MEMORY_CACHE: set[str] | None = None
 _BLACKLIST_MEMORY_CACHE_TIME: datetime | None = None
@@ -86,7 +82,6 @@ def download_blacklist() -> set[str]:
 def _get_blacklist_domains() -> set[str]:
     global _BLACKLIST_MEMORY_CACHE, _BLACKLIST_MEMORY_CACHE_TIME
 
-    # Fast path: read under lock so we see a consistent (cache, time) pair.
     with _BLACKLIST_LOCK:
         if (
             _BLACKLIST_MEMORY_CACHE is not None
@@ -95,15 +90,12 @@ def _get_blacklist_domains() -> set[str]:
         ):
             return _BLACKLIST_MEMORY_CACHE
 
-    # Cache miss or stale — do the potentially slow I/O OUTSIDE the lock so we
-    # don't block other threads for the whole download duration.
     if not _cache_is_fresh():
         domains = download_blacklist()
     else:
         cached = _load_cached_domains()
         domains = cached | set(FALLBACK_DOMAINS)
 
-    # Write back under lock — both assignments are atomic w.r.t. other threads.
     with _BLACKLIST_LOCK:
         _BLACKLIST_MEMORY_CACHE = domains
         _BLACKLIST_MEMORY_CACHE_TIME = datetime.now()
