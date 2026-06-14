@@ -88,7 +88,8 @@ input[type="url"] {
   color: #2563eb;
 }
 
-.analysis-state {
+.analysis-state,
+.page-state {
   display: grid;
   gap: 3px;
   padding: 9px 10px;
@@ -97,11 +98,17 @@ input[type="url"] {
   background: #fff;
 }
 
-.analysis-state strong {
+.page-state {
+  margin-top: 8px;
+}
+
+.analysis-state strong,
+.page-state strong {
   font-size: 13px;
 }
 
-.analysis-state span {
+.analysis-state span,
+.page-state span {
   color: #475569;
   font-size: 12px;
 }
@@ -119,6 +126,31 @@ input[type="url"] {
 }
 
 .analysis-state[data-status="disabled"] {
+  border-color: #6b7280;
+}
+
+.page-state[data-verdict="dangerous"] {
+  border-color: #dc2626;
+  background: #fff1f2;
+}
+
+.page-state[data-verdict="suspicious"] {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.page-state[data-verdict="safe"] {
+  border-color: #16a34a;
+  background: #f0fdf4;
+}
+
+.page-state[data-verdict="trusted_by_user"] {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.page-state[data-verdict="not_found"],
+.page-state[data-verdict="unknown"] {
   border-color: #6b7280;
 }
 

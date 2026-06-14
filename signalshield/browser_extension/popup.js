@@ -25,7 +25,10 @@ const elements = {
   trusted: document.getElementById("trusted"),
   analysisState: document.getElementById("analysisState"),
   analysisLabel: document.getElementById("analysisLabel"),
-  analysisDetail: document.getElementById("analysisDetail")
+  analysisDetail: document.getElementById("analysisDetail"),
+  currentPageState: document.getElementById("currentPageState"),
+  pageLabel: document.getElementById("pageLabel"),
+  pageDetail: document.getElementById("pageDetail")
 };
 
 let statsTimer = null;
@@ -70,6 +73,19 @@ function updateAnalysisState(analysis) {
   elements.analysisDetail.textContent = detail;
 }
 
+function updateCurrentPage(page) {
+  const safePage = page || {};
+  const verdict = safePage.verdict || "unknown";
+  const score = safePage.score || 0;
+  const stage = safePage.analysisStage === "python" ? "Python" : "Quick JS";
+  const domain = safePage.registeredDomain || safePage.hostname || "current page";
+  const reasons = Array.isArray(safePage.reasons) ? safePage.reasons : [];
+
+  elements.currentPageState.dataset.verdict = verdict;
+  elements.pageLabel.textContent = `Current page: ${verdict.toUpperCase()} (${score}%)`;
+  elements.pageDetail.textContent = `${stage} analysis for ${domain}. ${reasons.slice(0, 2).join(" ")}`;
+}
+
 function requestStats() {
   activeTab((tab) => {
     if (!tab || !tab.id) {
@@ -84,6 +100,7 @@ function requestStats() {
 
       updateStats(response.stats);
       updateAnalysisState(response.analysis);
+      updateCurrentPage(response.page);
     });
   });
 }
@@ -163,6 +180,7 @@ function rescanPage() {
 
       updateStats(response.stats);
       updateAnalysisState(response.analysis);
+      updateCurrentPage(response.page);
       setStatus("Page rescanned.");
     });
   });

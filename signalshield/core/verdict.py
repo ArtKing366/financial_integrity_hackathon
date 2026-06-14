@@ -3,6 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
+from core.analysis_cache import TtlCache
 from core.domain_utils import extract_hostname, extract_registered_domain, normalize_url
 
 
@@ -11,6 +12,10 @@ VERDICT_SUSPICIOUS = "SUSPICIOUS"
 VERDICT_SAFE = "SAFE"
 VERDICT_NOT_FOUND = "NOT_FOUND"
 VERDICT_TRUSTED_BY_USER = "TRUSTED_BY_USER"
+DNS_INFRASTRUCTURE_TTL_SECONDS = 10 * 60
+DOMAIN_AGE_TTL_SECONDS = 30 * 60
+PAGE_EXISTENCE_TTL_SECONDS = 90
+HTML_FETCH_TTL_SECONDS = 60
 
 
 try:
@@ -73,7 +78,6 @@ try:
 except Exception:
     check_domain_entropy = None
 
-
 @lru_cache(maxsize=1)
 def load_trusted_brands() -> list[str]:
     project_root = Path(__file__).resolve().parents[1]
@@ -101,10 +105,11 @@ def load_trusted_brands() -> list[str]:
         return []
 
 
-def new_analysis_context() -> dict[str, Any]:
+def new_analysis_context(shared_cache: TtlCache | None = None) -> dict[str, Any]:
     return {
         "trusted_brands": load_trusted_brands(),
         "cache": {},
+        "shared_cache": shared_cache,
     }
 
 
@@ -113,13 +118,22 @@ def cache_get(
     cache_name: str,
     key: str,
     factory: Callable[[], Any],
+    ttl_seconds: int | None = None,
 ) -> Any:
     cache = context.setdefault("cache", {}).setdefault(cache_name, {})
 
-    if key not in cache:
-        cache[key] = factory()
+    if key in cache:
+        return cache[key]
 
-    return cache[key]
+    shared_cache = context.get("shared_cache")
+
+    if ttl_seconds is not None and shared_cache is not None:
+        value = shared_cache.get_or_set(cache_name, key, ttl_seconds, factory)
+    else:
+        value = factory()
+
+    cache[key] = value
+    return value
 
 
 def run_similarity_check(domain: str, trusted_brands: list[str] | None = None) -> list:
@@ -187,6 +201,7 @@ def fetch_html_for_content_rules(url: str, context: dict[str, Any]) -> tuple[str
         "html_fetch",
         url,
         lambda: fetcher(url),
+        ttl_seconds=HTML_FETCH_TTL_SECONDS,
     )
 
 
@@ -260,12 +275,7 @@ def analyze_url(url: str, context: dict[str, Any] | None = None) -> dict:
 
     if find_list_match is not None:
         try:
-            local_match = cache_get(
-                context,
-                "local_list_match",
-                url,
-                lambda: find_list_match(url),
-            )
+            local_match = find_list_match(url)
         except Exception:
             local_match = None
 
@@ -339,6 +349,7 @@ def analyze_url(url: str, context: dict[str, Any] | None = None) -> dict:
                 "page_existence",
                 url,
                 lambda: check_page_existence(url),
+                ttl_seconds=PAGE_EXISTENCE_TTL_SECONDS,
             )
         except Exception as error:
             existence_result = {
@@ -365,8 +376,9 @@ def analyze_url(url: str, context: dict[str, Any] | None = None) -> dict:
             dns_result = cache_get(
                 context,
                 "dns_infrastructure",
-                domain,
+                domain or hostname or url,
                 lambda: analyze_dns_infrastructure(domain, trusted_brands),
+                ttl_seconds=DNS_INFRASTRUCTURE_TTL_SECONDS,
             )
         except Exception as error:
             dns_result = {
@@ -390,8 +402,9 @@ def analyze_url(url: str, context: dict[str, Any] | None = None) -> dict:
             age_days = cache_get(
                 context,
                 "domain_age",
-                domain,
+                domain or hostname or url,
                 lambda: get_domain_age(domain),
+                ttl_seconds=DOMAIN_AGE_TTL_SECONDS,
             )
         except Exception:
             age_days = None

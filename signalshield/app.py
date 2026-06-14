@@ -2,6 +2,7 @@ import html as html_lib
 
 import streamlit as st
 
+from core.analysis_cache import TtlCache
 from core.local_db import (
     LIST_BLACKLIST,
     LIST_TRUSTED,
@@ -23,10 +24,22 @@ from core.verdict import (
     VERDICT_SAFE,
     VERDICT_SUSPICIOUS,
     analyze_url,
+    new_analysis_context,
 )
 
 
 VERDICT_TRUSTED_BY_USER = "TRUSTED_BY_USER"
+
+
+def get_analysis_cache() -> TtlCache:
+    if "analysis_cache" not in st.session_state:
+        st.session_state["analysis_cache"] = TtlCache(max_entries=4096)
+
+    return st.session_state["analysis_cache"]
+
+
+def make_analysis_context() -> dict:
+    return new_analysis_context(shared_cache=get_analysis_cache())
 
 
 def format_value(value) -> str:
@@ -682,6 +695,7 @@ def render_message_details(result: dict) -> None:
     overview_tab, links_tab, raw_tab = st.tabs(["Overview", "Links", "Raw payload"])
     details = result.get("details", {})
     message_signals = result.get("message_signals", {})
+    market_manipulation = result.get("market_manipulation", {})
 
     with overview_tab:
         st.markdown("#### Message summary")
@@ -696,6 +710,7 @@ def render_message_details(result: dict) -> None:
             "unique_domains": details.get("unique_domains"),
             "max_link_score": details.get("max_link_score"),
             "message_signal_score": details.get("message_signal_score"),
+            "market_manipulation_score": details.get("market_manipulation_score"),
             "link_characteristic_score": details.get("link_characteristic_score"),
         }))
 
@@ -707,6 +722,16 @@ def render_message_details(result: dict) -> None:
             {"total_score": message_signals.get("score", 0)},
             rules=message_signals.get("matched_rules", []),
         )
+
+        if market_manipulation:
+            render_stage_section(
+                "Market manipulation",
+                market_manipulation.get("status", "SAFE"),
+                market_manipulation.get("score", 0),
+                "Looks for pump-and-dump, unrealistic return, insider-tip, and signal-group language.",
+                {"matched_rules": market_manipulation.get("matched_rules", [])},
+                evidence=market_manipulation.get("reasons", []),
+            )
 
         rows = message_link_rows(result)
         if rows:
@@ -802,7 +827,7 @@ if mode == "Single link":
 
     if should_analyze_link and url:
         with st.spinner("Analyzing link..."):
-            result = analyze_url(url)
+            result = analyze_url(url, context=make_analysis_context())
             record_scan_event(url, result, source="streamlit")
 
         render_verdict_banner(result)
@@ -825,7 +850,7 @@ elif mode == "Full message":
 
     if st.button("Analyze message") and message:
         with st.spinner("Analyzing message and all detected links..."):
-            result = analyze_message(message)
+            result = analyze_message(message, context=make_analysis_context())
             for link in result.get("links", []):
                 record_scan_event(
                     link.get("url", ""),

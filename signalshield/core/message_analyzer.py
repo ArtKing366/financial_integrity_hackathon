@@ -4,12 +4,14 @@ import unicodedata
 from urllib.parse import urlparse
 
 from core.domain_utils import extract_hostname, extract_registered_domain, normalize_url
+from core.market_manipulation import detect_market_manipulation
 from core.verdict import (
     VERDICT_DANGEROUS,
     VERDICT_NOT_FOUND,
     VERDICT_SAFE,
     VERDICT_SUSPICIOUS,
     analyze_url,
+    new_analysis_context,
 )
 
 
@@ -124,23 +126,7 @@ MESSAGE_RULES = [
         ],
         "description": "Message asks the user to install or use remote access software.",
     },
-    {
-        "id": "investment_manipulation_language",
-        "score": 15,
-        "terms": [
-            "gwarantowany zysk",
-            "bez ryzyka",
-            "krypto",
-            "crypto",
-            "inwestycja",
-            "pomnoz",
-            "zarobek",
-            "okazja inwestycyjna",
-        ],
-        "description": "Message contains investment-scam or market-manipulation language.",
-    },
 ]
-
 
 def normalize_text(value: str) -> str:
     value = value.lower()
@@ -278,17 +264,24 @@ def analyze_message_signals(message: str) -> dict:
     }
 
 
-def _message_verdict(score: int, has_only_not_found_links: bool) -> str:
-    if score >= 50:
+def _message_verdict(
+    score: int,
+    has_only_not_found_links: bool,
+    market_status: str = "SAFE",
+    non_market_score: int = 0,
+) -> str:
+    if market_status == "MARKET_MANIPULATION_RISK":
         return VERDICT_DANGEROUS
-    if score >= 20:
+    if score >= 70 or non_market_score >= 50:
+        return VERDICT_DANGEROUS
+    if market_status == "SUSPICIOUS" or score >= 20:
         return VERDICT_SUSPICIOUS
     if has_only_not_found_links:
         return VERDICT_NOT_FOUND
     return VERDICT_SAFE
 
 
-def analyze_message(message: str) -> dict:
+def analyze_message(message: str, context: dict | None = None) -> dict:
     message = message.strip()
 
     if not message:
@@ -303,12 +296,13 @@ def analyze_message(message: str) -> dict:
 
     extracted_links = extract_links(message)
     analyzed_links = []
+    context = context or new_analysis_context()
 
     for link in extracted_links:
         characteristics = characterize_link(link["url"])
 
         try:
-            link_result = analyze_url(link["url"])
+            link_result = analyze_url(link["url"], context=context)
         except Exception as error:
             link_result = {
                 "verdict": VERDICT_NOT_FOUND,
@@ -328,23 +322,34 @@ def analyze_message(message: str) -> dict:
         })
 
     message_signals = analyze_message_signals(message)
+    market_manipulation = detect_market_manipulation(message)
+    market_score = int(market_manipulation.get("score", 0) or 0)
     link_characteristic_score = min(
         sum(link["characteristics"]["score"] for link in analyzed_links),
         35,
     )
     max_link_score = max((link["score"] for link in analyzed_links), default=0)
-    total_score = min(max_link_score + message_signals["score"] + link_characteristic_score, 100)
+    non_market_score = max_link_score + message_signals["score"] + link_characteristic_score
+    total_score = min(non_market_score + market_score, 100)
 
     has_links = bool(analyzed_links)
     has_only_not_found_links = has_links and all(
         link["verdict"] == VERDICT_NOT_FOUND for link in analyzed_links
     )
-    verdict = _message_verdict(total_score, has_only_not_found_links)
+    verdict = _message_verdict(
+        total_score,
+        has_only_not_found_links,
+        market_manipulation.get("status", "SAFE"),
+        non_market_score,
+    )
 
     reasons = []
 
     for rule in message_signals["matched_rules"]:
         reasons.append(rule["description"])
+
+    if market_manipulation.get("matched_rules"):
+        reasons.extend(market_manipulation.get("reasons", []))
 
     for link in analyzed_links:
         if link["verdict"] in {VERDICT_DANGEROUS, VERDICT_SUSPICIOUS}:
@@ -374,12 +379,14 @@ def analyze_message(message: str) -> dict:
         "reasons": reasons,
         "links": analyzed_links,
         "message_signals": message_signals,
+        "market_manipulation": market_manipulation,
         "details": {
             "message_length": len(message),
             "link_count": len(analyzed_links),
             "unique_domains": unique_domains,
             "max_link_score": max_link_score,
             "message_signal_score": message_signals["score"],
+            "market_manipulation_score": market_score,
             "link_characteristic_score": link_characteristic_score,
         },
     }

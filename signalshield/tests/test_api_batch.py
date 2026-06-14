@@ -1,0 +1,101 @@
+import api_server
+
+from core.analysis_cache import TtlCache
+
+
+def test_normalize_unique_links_preserves_order_and_deduplicates() -> None:
+    links = [
+        "example-one.pl/path",
+        "https://example-two.pl",
+        "example-one.pl/path",
+        "",
+    ]
+
+    assert api_server.normalize_unique_links(links) == [
+        "https://example-one.pl/path",
+        "https://example-two.pl",
+    ]
+
+
+def test_analyze_links_batch_preserves_input_order(monkeypatch) -> None:
+    def fake_analyze_url(url: str, context: dict) -> dict:
+        return {"verdict": "SAFE", "score": 0, "reasons": [url], "details": {}}
+
+    monkeypatch.setattr(api_server, "analyze_url", fake_analyze_url)
+    monkeypatch.setattr(api_server, "new_analysis_context", lambda shared_cache=None: {})
+
+    results = api_server.analyze_links_batch(
+        [
+            "https://b-example.pl/two",
+            "https://a-example.pl/one",
+            "https://b-example.pl/two",
+        ],
+        max_workers=3,
+    )
+
+    assert [item["url"] for item in results] == [
+        "https://b-example.pl/two",
+        "https://a-example.pl/one",
+    ]
+
+
+def test_analyze_links_batch_reuses_context_inside_domain_group(monkeypatch) -> None:
+    contexts_by_url = {}
+    markers = iter(range(100))
+
+    def fake_context(shared_cache=None) -> dict:
+        return {"marker": next(markers)}
+
+    def fake_analyze_url(url: str, context: dict) -> dict:
+        contexts_by_url[url] = context["marker"]
+        return {"verdict": "SAFE", "score": 0, "reasons": [], "details": {}}
+
+    monkeypatch.setattr(api_server, "new_analysis_context", fake_context)
+    monkeypatch.setattr(api_server, "analyze_url", fake_analyze_url)
+
+    api_server.analyze_links_batch(
+        [
+            "https://same-example.pl/first",
+            "https://same-example.pl/second",
+            "https://other-example.pl/item",
+        ],
+        max_workers=3,
+    )
+
+    assert contexts_by_url["https://same-example.pl/first"] == contexts_by_url[
+        "https://same-example.pl/second"
+    ]
+    assert contexts_by_url["https://same-example.pl/first"] != contexts_by_url[
+        "https://other-example.pl/item"
+    ]
+
+
+def test_analyze_links_batch_passes_shared_cache_to_each_context(monkeypatch) -> None:
+    shared_cache = TtlCache()
+    observed_caches = []
+
+    def fake_context(shared_cache=None) -> dict:
+        observed_caches.append(shared_cache)
+        return {"shared_cache": shared_cache}
+
+    def fake_analyze_url(url: str, context: dict) -> dict:
+        assert context["shared_cache"] is shared_cache
+        return {"verdict": "SAFE", "score": 0, "reasons": [], "details": {}}
+
+    monkeypatch.setattr(api_server, "SHARED_ANALYSIS_CACHE", shared_cache)
+    monkeypatch.setattr(api_server, "new_analysis_context", fake_context)
+    monkeypatch.setattr(api_server, "analyze_url", fake_analyze_url)
+
+    api_server.analyze_links_batch(
+        [
+            "https://first-domain-example.pl/a",
+            "https://second-domain-example.pl/b",
+        ],
+        max_workers=1,
+    )
+    api_server.analyze_links_batch(
+        ["https://third-domain-example.pl/c"],
+        max_workers=1,
+    )
+
+    assert observed_caches == [shared_cache, shared_cache, shared_cache]
