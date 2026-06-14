@@ -26,9 +26,6 @@ class TtlCache:
     def __init__(
         self,
         max_entries: int = 2048,
-        # FIX: added max_inflight to bound the _inflight dict.
-        # Without this limit, a burst of unique keys whose factories hang
-        # would grow _inflight without bound, causing an OOM.
         max_inflight: int = 512,
         clock: Callable[[], float] | None = None,
     ) -> None:
@@ -60,10 +57,6 @@ class TtlCache:
                 inflight = self._inflight.get(cache_key)
 
                 if inflight is None:
-                    # FIX: Guard against unbounded _inflight growth.
-                    # If too many in-flight requests are pending (e.g. all
-                    # factories are hung), refuse to add more rather than
-                    # silently consuming memory.
                     if len(self._inflight) >= self.max_inflight:
                         raise RuntimeError(
                             f"TtlCache in-flight limit reached "

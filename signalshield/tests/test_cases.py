@@ -86,3 +86,34 @@ def test_user_trusted_list_keeps_original_verdict() -> None:
     assert result["verdict"] == VERDICT_TRUSTED_BY_USER
     assert result["details"]["original_verdict"] in {VERDICT_SUSPICIOUS, VERDICT_DANGEROUS}
     assert result["details"]["local_list_match"]["list_type"] == LIST_TRUSTED
+
+
+def test_user_trusted_list_overrides_cert_blacklist_false_positive() -> None:
+    add_list_entry(LIST_TRUSTED, SCOPE_DOMAIN, "cert-false-positive.example")
+
+    with (
+        patch("core.verdict.get_domain_age", return_value=None),
+        patch("core.verdict.check_blacklist", return_value=True),
+        patch(
+            "core.verdict.check_page_existence",
+            return_value={"status": "exists", "exists": True, "evidence": []},
+        ),
+        patch(
+            "core.verdict.analyze_dns_infrastructure",
+            return_value={"score": 0, "status": "mx_found"},
+        ),
+        patch(
+            "core.verdict.analyze_html_crawling",
+            return_value={"score": 0, "matched_rules": []},
+        ),
+        patch(
+            "core.verdict.analyze_page_rules",
+            return_value={"score": 0, "hard_block": False, "matched_rules": []},
+        ),
+    ):
+        result = analyze_url("https://cert-false-positive.example/pay")
+
+    assert result["verdict"] == VERDICT_TRUSTED_BY_USER
+    assert result["details"]["blacklist_status"] == (
+        "Skipped because the user trusted this exact target."
+    )
