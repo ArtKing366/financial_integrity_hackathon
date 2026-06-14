@@ -1,0 +1,52 @@
+services:
+  signalshield-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: signalshield:local
+    container_name: signalshield-api
+    command: ["python", "api_server.py", "--host", "0.0.0.0", "--port", "8766"]
+    environment:
+      SIGNALSHIELD_DB_PATH: /app/runtime/signalshield.sqlite3
+    ports:
+      - "8766:8766"
+    volumes:
+      - signalshield-runtime:/app/runtime
+      - signalshield-home:/home/signalshield/.signalshield
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  signalshield-app:
+    image: signalshield:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: signalshield-app
+    command:
+      - python
+      - -m
+      - streamlit
+      - run
+      - app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+    environment:
+      SIGNALSHIELD_DB_PATH: /app/runtime/signalshield.sqlite3
+    ports:
+      - "8501:8501"
+    volumes:
+      - signalshield-runtime:/app/runtime
+      - signalshield-home:/home/signalshield/.signalshield
+    depends_on:
+      signalshield-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  signalshield-runtime:
+  signalshield-home:

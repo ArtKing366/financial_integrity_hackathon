@@ -1,6 +1,8 @@
 import re
 from urllib.parse import parse_qs, urljoin, urlparse
 
+from core.domain_utils import extract_registered_domain
+
 try:
     import requests
 except Exception:
@@ -61,6 +63,16 @@ SUSPICIOUS_DOMAIN_PATTERNS = [
     r"(login|verify|secure|auth)-?(microsoft|office|outlook|365)",
 ]
 
+TUNNEL_DOMAIN_SUFFIXES = {
+    "ngrok-free.app",
+    "trycloudflare.com",
+}
+
+PUBLIC_HOSTING_SUFFIXES = {
+    "pages.dev",
+    "workers.dev",
+}
+
 
 def normalize_url(url: str) -> str:
     url = url.strip()
@@ -77,6 +89,23 @@ def normalize_url(url: str) -> str:
 def get_hostname(url: str) -> str:
     parsed = urlparse(url)
     return parsed.hostname.lower() if parsed.hostname else ""
+
+
+def hostname_matches_suffix(hostname: str, suffixes: set[str]) -> bool:
+    return any(hostname == suffix or hostname.endswith(f".{suffix}") for suffix in suffixes)
+
+
+def trusted_domain_set(trusted_domains: list[str] | None) -> set[str]:
+    return {domain.lower().strip() for domain in trusted_domains or [] if domain}
+
+
+def referenced_trusted_domains(text: str, trusted_domains: list[str] | None) -> list[str]:
+    normalized_text = text.lower()
+    return sorted(
+        domain
+        for domain in trusted_domain_set(trusted_domains)
+        if domain and domain in normalized_text
+    )
 
 
 def is_trusted_microsoft_login(hostname: str) -> bool:
@@ -238,6 +267,7 @@ def analyze_page_rules(
     url: str,
     html: str | None = None,
     fetch_error: str | None = None,
+    trusted_domains: list[str] | None = None,
 ) -> dict:
     """
     Analyze page content with rules inspired by CyberDrain/Check.
@@ -252,6 +282,8 @@ def analyze_page_rules(
     """
     url = normalize_url(url)
     hostname = get_hostname(url)
+    registered_domain = extract_registered_domain(url)
+    trusted_domains_normalized = trusted_domain_set(trusted_domains)
 
     result = {
         "score": 0,
@@ -271,6 +303,9 @@ def analyze_page_rules(
             "description": "Official Microsoft login domain",
             "score": 0,
         })
+        return result
+
+    if registered_domain in trusted_domains_normalized:
         return result
 
     suspicious_domain_matches = detect_suspicious_domain(hostname)
@@ -316,6 +351,7 @@ def analyze_page_rules(
     soup = BeautifulSoup(html, "html.parser")
     page_text = soup.get_text(" ", strip=True)
     combined_text = f"{html} {page_text}"
+    trusted_references = referenced_trusted_domains(combined_text, trusted_domains)
 
     microsoft_branding = has_microsoft_branding(combined_text)
     password_field = has_password_field(soup)
@@ -325,6 +361,37 @@ def analyze_page_rules(
     microsoft_context = bool(
         suspicious_domain_matches or microsoft_branding or aad_matches
     )
+
+    if password_field and trusted_references:
+        if hostname_matches_suffix(hostname, TUNNEL_DOMAIN_SUFFIXES):
+            result["score"] += 35
+            result["matched_rules"].append({
+                "id": "credential_form_on_tunnel",
+                "severity": "critical",
+                "description": "Credential form is hosted on a public tunnel domain.",
+                "matches": [hostname],
+                "score": 35,
+            })
+        elif hostname_matches_suffix(hostname, PUBLIC_HOSTING_SUFFIXES):
+            result["score"] += 35
+            result["matched_rules"].append({
+                "id": "credential_form_on_public_hosting",
+                "severity": "critical",
+                "description": "Credential form is hosted on public static or worker infrastructure.",
+                "matches": [hostname],
+                "score": 35,
+            })
+
+        if registered_domain not in trusted_domains_normalized:
+            result["score"] += 45
+            result["hard_block"] = True
+            result["matched_rules"].append({
+                "id": "trusted_brand_credential_form_on_external_domain",
+                "severity": "critical",
+                "description": "Credential form references a trusted financial brand from an external domain.",
+                "matches": trusted_references[:5],
+                "score": 45,
+            })
 
     if len(aad_matches) >= 2:
         result["score"] += 35
