@@ -110,22 +110,25 @@
     lastDeepSignature: ""
   };
 
+  const POLISH_DIACRITICS = /[\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017c\u017a]/g;
+  const POLISH_CHAR_MAP = {
+    "\u0105": "a",
+    "\u0107": "c",
+    "\u0119": "e",
+    "\u0142": "l",
+    "\u0144": "n",
+    "\u00f3": "o",
+    "\u015b": "s",
+    "\u017c": "z",
+    "\u017a": "z"
+  };
+
   function normalizeText(value) {
     return decodeURIComponentSafe(value)
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[ąćęłńóśżź]/g, (char) => ({
-        "ą": "a",
-        "ć": "c",
-        "ę": "e",
-        "ł": "l",
-        "ń": "n",
-        "ó": "o",
-        "ś": "s",
-        "ż": "z",
-        "ź": "z"
-      }[char] || char));
+      .replace(POLISH_DIACRITICS, (char) => POLISH_CHAR_MAP[char] || char);
   }
 
   function decodeURIComponentSafe(value) {

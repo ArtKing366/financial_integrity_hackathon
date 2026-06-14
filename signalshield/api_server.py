@@ -36,23 +36,23 @@ SHARED_ANALYSIS_CACHE = TtlCache(max_entries=4096)
 
 
 def get_or_create_api_token() -> str:
-    """Получает существующий или генерирует новый секретный токен для API."""
+    """Return the existing API token or create a new one."""
     token_path = Path.home() / ".signalshield" / "api_token"
     if token_path.exists():
         return token_path.read_text().strip()
 
     token_path.parent.mkdir(parents=True, exist_ok=True)
-    token = secrets.token_hex(32)  # Генерируем безопасный 256-битный ключ
+    token = secrets.token_hex(32)  # 256-bit secret
     token_path.write_text(token)
 
-    # Ограничиваем права доступа к файлу (для Linux и macOS)
+    # Restrict file permissions on Linux and macOS.
     if os.name != "nt":
         token_path.chmod(0o600)
 
     return token
 
 
-# Инициализируем локальный токен при старте сервера
+# Initialize the local API token at server startup.
 API_TOKEN = get_or_create_api_token()
 
 
@@ -146,20 +146,20 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         allowed_schemes = ("chrome-extension://", "moz-extension://", "safari-web-extension://")
 
-        # Разрешаем CORS динамически только для расширений браузера
+        # Allow CORS only for browser extensions.
         if origin and origin.startswith(allowed_schemes):
             self.send_header("Access-Control-Allow-Origin", origin)
         else:
-            # Делфолтный безопасный fallback для локальных запросов без Origin
+            # Safe fallback for local requests without an Origin header.
             self.send_header("Access-Control-Allow-Origin", "http://127.0.0.1:8766")
 
-        # Разрешаем передачу заголовка авторизации
+        # Allow the Authorization header in preflight requests.
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         super().end_headers()
 
     def is_authenticated(self) -> bool:
-        """Проверяет заголовок Authorization на соответствие секретному токену."""
+        """Check whether the Authorization header matches the API token."""
         auth_header = self.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header.split(" ", 1)[1]
@@ -173,12 +173,12 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
 
-        # Публичный и безопасный эндпоинт для проверки работоспособности
+        # Public health check endpoint.
         if parsed.path == "/health":
             self.send_json({"ok": True, "service": "signalshield-api", "auth_required": False})
             return
 
-        # Публичный read-only конфиг для quick-check расширения (только домены из data/)
+        # Public read-only quick-check config for the browser extension.
         if parsed.path == "/quick-rules":
             self.send_json({
                 "ok": True,
@@ -187,7 +187,7 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
             })
             return
 
-        # Защита всех остальных GET эндпоинтов
+        # Protect all other GET endpoints.
         if not self.is_authenticated():
             self.send_json({"ok": False, "error": "Unauthorized"}, status=401)
             return
@@ -225,7 +225,7 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
         self.send_json({"ok": False, "error": "Not found"}, status=404)
 
     def do_POST(self) -> None:
-        # Полный запрет любых мутаций и анализов без авторизации
+        # Reject mutations and analysis without authentication.
         if not self.is_authenticated():
             self.send_json({"ok": False, "error": "Unauthorized"}, status=401)
             return
@@ -255,7 +255,7 @@ class SignalShieldHandler(BaseHTTPRequestHandler):
         self.send_json({"ok": False, "error": "Not found"}, status=404)
 
     def do_DELETE(self) -> None:
-        # Защита деструктивных методов удаления/деактивации
+        # Protect destructive DELETE endpoints.
         if not self.is_authenticated():
             self.send_json({"ok": False, "error": "Unauthorized"}, status=401)
             return

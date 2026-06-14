@@ -54,17 +54,10 @@ SUSPICIOUS_TLDS = {
     "cam",
 }
 
-POLISH_CHAR_MAP = str.maketrans({
-    "ą": "a",
-    "ć": "c",
-    "ę": "e",
-    "ł": "l",
-    "ń": "n",
-    "ó": "o",
-    "ś": "s",
-    "ż": "z",
-    "ź": "z",
-})
+POLISH_CHAR_MAP = str.maketrans(
+    "\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017c\u017a",
+    "acelnoszz",
+)
 
 MESSAGE_RULES = [
     {
